@@ -1,0 +1,14 @@
+services:
+  hub:
+    build: .
+    container_name: shard-link_hub
+    volumes:
+      # This is the "Dual-Boot Bridge"
+      # Map your local data folder to the container's storage
+      - ./data:/app/data
+    environment:
+      - DATABASE_PATH=/app/data/vessel.db
+    ports:
+      - "8080:8080" # For the MCP SSE server later
+
+  # We'll add cloudflared here in phase 5
