@@ -8,12 +8,12 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 - [x] Verify manual `vec_distance_cosine` (Go) integration in `cmd/check_vec`.
 
 ## Phase 2: The Vessel (Storage Layer)
-- [ ] Define `Shard` and `ShardBond` structs with JSONB metadata support.
-- [ ] Create `schema.sql` (or Go migration logic) for:
+- [x] Define `Shard` and `ShardBond` structs with JSONB metadata support.
+- [x] Create `schema.sql` (or Go migration logic) for:
     - `shards` table (id, category, resonance, last_used, vector BLOB, metadata JSONB).
     - `shard_bonds` table (from_id, to_id, weight).
-- [ ] Implement `Vessel.SaveShard` logic.
-- [ ] Implement `Vessel.FindResonant` using Go-based `vec_distance_cosine` function.
+- [x] Implement `Vessel.SaveShard` logic.
+- [x] Implement `Vessel.FindResonant` using Go-based `vec_distance_cosine` function.
 
 ## Phase 3: The Janitor (Resonance & Eviction)
 - [ ] Implement the `Scorer` interface for calculating resonance and link count.
@@ -36,4 +36,5 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 - [ ] Final end-to-end testing between local Go daemon and external AI (Gemini/ChatGPT).
 
 ---
-*Status: Initial Plan Drafting | Date: 2026-04-04*
+*Status: Storage Layer Completed | Date: 2026-04-05*
+.
