@@ -3,9 +3,9 @@
 This document serves as the step-by-step checklist for the Shard-Link "Memory Hub." Each phase follows the **Active Learning** mandate: I (Gemini) provide the "Why" and the scaffolds; you (Izenberk) implement the core logic.
 
 ## Phase 1: Environment & Tooling (Config Layer)
-- [x] Initialize `go.mod` and add dependencies (`ncruces/go-sqlite3` or similar CGO-free driver).
+- [x] Initialize `go.mod` and add dependencies (`ncruces/go-sqlite3` v0.33+).
 - [x] Setup Docker Compose for dual-boot (Ubuntu/Windows 11) using bind-mounts to the shared NTFS/ExFAT partition.
-- [ ] Verify `sqlite-vec` extension loading in a test environment.
+- [x] Verify manual `vec_distance_cosine` (Go) integration in `cmd/check_vec`.
 
 ## Phase 2: The Vessel (Storage Layer)
 - [ ] Define `Shard` and `ShardBond` structs with JSONB metadata support.
@@ -13,7 +13,7 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
     - `shards` table (id, category, resonance, last_used, vector BLOB, metadata JSONB).
     - `shard_bonds` table (from_id, to_id, weight).
 - [ ] Implement `Vessel.SaveShard` logic.
-- [ ] Implement `Vessel.FindResonant` using `sqlite-vec`'s cosine similarity.
+- [ ] Implement `Vessel.FindResonant` using Go-based `vec_distance_cosine` function.
 
 ## Phase 3: The Janitor (Resonance & Eviction)
 - [ ] Implement the `Scorer` interface for calculating resonance and link count.

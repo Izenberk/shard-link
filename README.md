@@ -6,8 +6,9 @@ Shard-Link is a high-performance "Memory Hub" designed to provide long-term memo
 Maintain a persistent "Remembrance" across AI sessions through high-performance Go-based context routing, ensuring "Your Shards, Your Vessel" (Privacy & Safety).
 
 ## 2. Technical Stack
-- **Backend:** Go (Golang) 1.22+ (Strict SOLID standards).
-- **Database:** SQLite + `sqlite-vec` (SIMD-accelerated Vector Search).
+- **Backend:** Go (Golang) 1.26+ (Strict SOLID standards).
+- **Database:** SQLite (via `ncruces/go-sqlite3` WASM/wasm2go driver).
+- **Resonance Engine:** Manual Go-based implementation of `vec_distance_cosine` (CGO-free).
 - **Metadata:** JSONB (Binary JSON) for flexible "Ego" state.
 - **Protocol:** MCP (Model Context Protocol) over SSE/JSON-RPC.
 - **Environment:** Docker-native for Ubuntu/Windows 11 dual-boot via shared partitions.
