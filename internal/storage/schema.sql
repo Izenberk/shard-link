@@ -1,3 +1,4 @@
+-- Standard Shards (Active Memory)
 CREATE TABLE IF NOT EXISTS shards (
     id          TEXT PRIMARY KEY,
     category    TEXT NOT NULL,      -- 'core', 'session', 'memory'
@@ -8,6 +9,17 @@ CREATE TABLE IF NOT EXISTS shards (
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- THE BASEMENT (Tiered/Archival Storage)
+CREATE TABLE IF NOT EXISTS shards_archive (
+    id          TEXT PRIMARY KEY,
+    category    TEXT NOT NULL,
+    content     TEXT NOT NULL,
+    vector      BLOB NOT NULL,
+    metadata    BLOB,
+    archived_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Relational Mesh
 CREATE TABLE IF NOT EXISTS shard_bonds (
     from_id     TEXT NOT NULL,
     to_id       TEXT NOT NULL,

@@ -9,19 +9,19 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 
 ## Phase 2: The Vessel (Storage Layer)
 - [x] Define `Shard` and `ShardBond` structs with JSONB metadata support.
-- [x] Create `schema.sql` (or Go migration logic) for:
-    - `shards` table (id, category, resonance, last_used, vector BLOB, metadata JSONB).
-    - `shard_bonds` table (from_id, to_id, weight).
-- [x] Implement `Vessel.SaveShard` logic.
+- [x] Create `schema.sql` with Tiered Storage support (`shards_archive`).
+- [x] Implement `Vessel.SaveShard` with Upsert logic.
 - [x] Implement `Vessel.FindResonant` using Go-based `vec_distance_cosine` function.
+- [x] Implement `Vessel.ArchiveShard` for fading memories to the Basement.
 
 ## Phase 3: The Janitor (Resonance & Eviction)
-- [ ] Implement the `Scorer` interface for calculating resonance and link count.
-- [ ] Implement the **Deterministic Eviction Hierarchy**:
+- [x] Implement the `Scorer` interface for importance calculation.
+- [ ] Implement the **Standardized Eviction Hierarchy**:
     1. Skip `core` category.
-    2. Sort by `LastUsed` (Oldest first).
-    3. Sort by `LinkCount` (Least related/orphans first).
-    4. Sort by `DataSize` (Largest first).
+    2. **Dependency Immunity**: Skip shards with `weight > 0.85` bonds.
+    3. Sort by `LastUsed` (Oldest first).
+    4. Sort by `LinkCount` (Least related/orphans first).
+- [ ] Implement `sync.Pool` for vector buffer optimization.
 - [ ] Setup a background worker to run the Janitor on a configurable interval.
 
 ## Phase 4: Model Context Protocol (The Bridge)
@@ -36,5 +36,4 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 - [ ] Final end-to-end testing between local Go daemon and external AI (Gemini/ChatGPT).
 
 ---
-*Status: Storage Layer Completed | Date: 2026-04-05*
-.
+*Status: Standardized & Optimized Upgrade | Date: 2026-04-06*

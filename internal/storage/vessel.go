@@ -162,3 +162,95 @@ func cosineSimilarity(a, b []float32) float64 {
 	}
 	return dot / (math.Sqrt(normA) * math.Sqrt(normB))
 }
+
+// GetCount returns the total number of shards in the vessel.
+func (v *Vessel) GetCount() (int, error) {
+	stmt, _, err := v.conn.Prepare("SELECT COUNT(*) FROM shards")
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+
+	if stmt.Step() {
+		return stmt.ColumnInt(0), nil
+	}
+	return 0, stmt.Err()
+}
+
+// GetEvictionCandidates finds the 'limit' worst shards based on the deterministic hierarchy:
+// 1. Skip 'core' category.
+// 2. Oldest 'last_used' first.
+// 3. Least connected (orphans) first.
+func (v *Vessel) GetEvictionCandidates(limit int) ([]string, error) {
+	const query = `
+		SELECT id FROM shards
+		WHERE category != 'core'
+			-- DEPENDENCY IMMUNITY: Don't evict if someone has a strong bond to it
+			AND id NOT IN (SELECT to_id FROM shard_bonds WHERE weight > 0.85)
+		ORDER BY
+			last_used ASC,
+			(SELECT COUNT(*) FROM shard_bonds WHERE from_id = shards.id OR to_id = shards.id) ASC
+		LIMIT ?;
+	`
+	stmt, _, err := v.conn.Prepare(query)
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+
+	stmt.BindInt(1, limit)
+
+	var ids []string
+	for stmt.Step() {
+		ids = append(ids, stmt.ColumnText(0))
+	}
+	return ids, stmt.Err()
+}
+
+// DeleteShard removes a shard and all its bonds (via ON DELETE CASCADE).
+func (v *Vessel) DeleteShard(id string) error {
+	stmt, _, err := v.conn.Prepare("DELETE FROM shards WHERE id = ?")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	stmt.BindText(1, id)
+	return stmt.Exec()
+}
+
+// CreateBond manually links two shards.
+func (v *Vessel) CreateBond(b ShardBond) error {
+	const query = `INSERT OR REPLACE INTO shard_bonds (from_id, to_id, weight) VALUES (?, ?, ?)`
+	stmt, _, err := v.conn.Prepare(query)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	stmt.BindText(1, b.FromID)
+	stmt.BindText(2, b.ToID)
+	stmt.BindFloat(3, b.Weight)
+
+	return stmt.Exec()
+}
+
+// ArchiveShard moves a shard to the Basement and deletes it from active memory.
+func (v *Vessel) ArchiveShard(id string) error {
+	const query = `
+		INSERT OR REPLACE INTO shards_archive (id, category, content, vector, metadata)
+		SELECT id, category, content, vector, metadata FROM shards WHERE id = ?;
+	`
+	stmt, _, err := v.conn.Prepare(query)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	stmt.BindText(1, id)
+
+	if err := stmt.Exec(); err != nil {
+		return err
+	}
+
+	return v.DeleteShard(id)
+}
