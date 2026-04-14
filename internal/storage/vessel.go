@@ -5,12 +5,21 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"github.com/ncruces/go-sqlite3"
+	"sync"
 
+	"github.com/ncruces/go-sqlite3"
 )
 
 //go:embed schema.sql
 var schema string
+
+// Add the Pool
+var vectorPool = sync.Pool{
+	New: func() any {
+		// We pre-allocate 1536 slots (the standard dimension for OpenAI/Gemini)
+		return make([]float32, 1536)
+	},
+}
 
 type Vessel struct {
 	conn *sqlite3.Conn
@@ -34,11 +43,23 @@ func NewVessel (path string) (*Vessel, error) {
 		conn.Close()
 		return nil, fmt.Errorf("reg vec_version: %w", err)
 	}
-
+	
 	// 2. Register vec_distance_cosine (The heart of Shard-Link)
+	// Update the vec_distance_cosine block:
 	err = conn.CreateFunction("vec_distance_cosine", 2, sqlite3.DETERMINISTIC, func(ctx sqlite3.Context, arg ...sqlite3.Value) {
 		v1 := decodeVector(arg[0].RawBlob())
 		v2 := decodeVector(arg[1].RawBlob())
+
+		// CRITICAL: Return the memory to the pool so it can be reused!
+		defer func ()  {
+			// Only return to pool if it's the standard size we manage (cap 1536)
+			if v1 != nil && cap(v1) == 1536 {
+				vectorPool.Put(v1[:1536])		// Reslice to full size before putting back
+			}
+			if v2 != nil && cap(v2) == 1536 {
+				vectorPool.Put(v2[:1536])
+			}
+		}()
 
 		if v1 == nil || v2 == nil || len(v1) != len(v2) {
 			ctx.ResultFloat(2.0) // Maximum distance for invalid comparison
@@ -140,8 +161,20 @@ func decodeVector(b []byte) []float32 {
 	if len(b) == 0 || len(b)%4 != 0 {
 		return nil
 	}
-	v := make([]float32, len(b)/4)
-	for i := range v {
+
+	// Ensure the slice is the correct length for this specific blob
+	limit := len(b) / 4
+	var v []float32
+
+	// Borrow a pre-allocated slice from the pool
+	if limit <= 1536 {
+		v = vectorPool.Get().([]float32)
+		v = v[:limit]
+	} else {
+		v = make([]float32, limit)
+	}
+
+	for i := 0; i < limit; i++ {
 		bits := binary.LittleEndian.Uint32(b[i*4:])
 		v[i] = math.Float32frombits(bits)
 	}

@@ -16,13 +16,13 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 
 ## Phase 3: The Janitor (Resonance & Eviction)
 - [x] Implement the `Scorer` interface for importance calculation.
-- [ ] Implement the **Standardized Eviction Hierarchy**:
+- [x] Implement the **Standardized Eviction Hierarchy**:
     1. Skip `core` category.
     2. **Dependency Immunity**: Skip shards with `weight > 0.85` bonds.
     3. Sort by `LastUsed` (Oldest first).
     4. Sort by `LinkCount` (Least related/orphans first).
-- [ ] Implement `sync.Pool` for vector buffer optimization.
-- [ ] Setup a background worker to run the Janitor on a configurable interval.
+- [x] Implement `sync.Pool` for vector buffer optimization.
+- [x] Setup a background worker to run the Janitor on a configurable interval.
 
 ## Phase 4: Model Context Protocol (The Bridge)
 - [ ] Setup the MCP JSON-RPC server over SSE (Server-Sent Events).
