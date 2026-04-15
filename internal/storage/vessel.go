@@ -288,20 +288,37 @@ func (v *Vessel) ArchiveShard(id string) error {
 	return v.DeleteShard(id)
 }
 
-func (v *Vessel) GetCoreShards() ([]Shard, error) {
-	const query = `SELECT id, content FROM shards WHERE category = 'core'`
-	stmt, _, err := v.conn.Prepare(query)
+func (v *Vessel) FindText(query string, limit int) ([]Shard, error) {
+	const sqlQuery = `
+		SELECT id, category, content, vector, metadata, last_used, created_at
+		FROM shards
+		WHERE content LIKE ?
+		ORDER BY last_used DESC
+		LIMIT ?;
+	`
+	stmt, _, err := v.conn.Prepare(sqlQuery)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("prepare text search: %w", err)
 	}
 	defer stmt.Close()
+
+	stmt.BindText(1, "%"+query+"%")
+	stmt.BindInt(2, limit)
 
 	var shards []Shard
 	for stmt.Step() {
 		shards = append(shards, Shard{
-			ID:				stmt.ColumnText(0),
-			Content: 	stmt.ColumnText(1),
+			ID:       stmt.ColumnText(0),
+			Category: stmt.ColumnText(1),
+			Content:  stmt.ColumnText(2),
+			Vector:   stmt.ColumnBlob(3, nil),
+			Metadata: stmt.ColumnBlob(4, nil),
 		})
 	}
-	return shards, stmt.Err()
+
+	if err := stmt.Err(); err != nil {
+		return nil, fmt.Errorf("scan text results: %w", err)
+	}
+
+	return shards, nil
 }

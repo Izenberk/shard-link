@@ -41,13 +41,21 @@ func NewMCPServer(v *storage.Vessel) *MCPServer {
 func (s *MCPServer) registerTools() {
 	// Tool 1: search_memory
 	searchTool := mcp.NewTool("search_memory",
-		mcp.WithDescription("Search long-term memory using semantic resonance"),
+		mcp.WithDescription("Search long-term memory using semantic resonance (vector search)"),
 		mcp.WithString("query_vector", mcp.Description("Base64 encoded float32 vector"), mcp.Required()),
 		mcp.WithNumber("limit", mcp.Description("Max results to return")),
 	)
 	s.mcp.AddTool(searchTool, s.handleSearch)
 
-	// Tool 2: save_memory
+	// Tool 2: search_text
+	searchTextTool := mcp.NewTool("search_text",
+		mcp.WithDescription("Search long-term memory using keyword matching (SQL LIKE)"),
+		mcp.WithString("query", mcp.Description("The keyword or phrase to search for"), mcp.Required()),
+		mcp.WithNumber("limit", mcp.Description("Max results to return")),
+	)
+	s.mcp.AddTool(searchTextTool, s.handleSearchText)
+
+	// Tool 3: save_memory
 	saveTool := mcp.NewTool("save_memory",
 		mcp.WithDescription("Save a new contextual fragment to long-term memory"),
 		mcp.WithString("id", mcp.Description("Unique identifier"), mcp.Required()),
@@ -57,6 +65,7 @@ func (s *MCPServer) registerTools() {
 	)
 	s.mcp.AddTool(saveTool, s.handleSave)
 }
+
 
 func (s *MCPServer) registerResources() {
 	// 1. Define the resource
@@ -112,6 +121,30 @@ func (s *MCPServer) handleSearch(ctx context.Context, request mcp.CallToolReques
 	var response string
 	for _, shard := range results {
 		response += fmt.Sprintf("[%s]: %s\n---\n", shard.ID, shard.Content)
+	}
+
+	return mcp.NewToolResultText(response), nil
+}
+
+func (s *MCPServer) handleSearchText(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	// 1. Parse Arguments
+	query := request.GetString("query", "")
+	limit := int(request.GetFloat("limit", 5))
+
+	// 2. Query the Vessel
+	results, err := s.vessel.FindText(query, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	// 3. Format for AI
+	var response string
+	if len(results) == 0 {
+		response = "No matching memory shards found."
+	} else {
+		for _, shard := range results {
+			response += fmt.Sprintf("[%s]: %s\n---\n", shard.ID, shard.Content)
+		}
 	}
 
 	return mcp.NewToolResultText(response), nil
