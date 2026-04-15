@@ -25,10 +25,10 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 - [x] Setup a background worker to run the Janitor on a configurable interval.
 
 ## Phase 4: Model Context Protocol (The Bridge)
-- [ ] Setup the MCP JSON-RPC server over SSE (Server-Sent Events).
-- [ ] Implement `mcp.ListTools` (to expose memory search as a tool).
-- [ ] Implement `mcp.CallTool` to execute `FindResonant` searches.
-- [ ] Implement `mcp.ListResources` (to expose the "Core Shard" as a system resource).
+- [x] Setup the MCP JSON-RPC server over SSE (Server-Sent Events).
+- [x] Implement `mcp.ListTools` (to expose memory search as a tool).
+- [x] Implement `mcp.CallTool` to execute `FindResonant` searches.
+- [x] Implement `mcp.ListResources` (to expose the "Core Shard" as a system resource).
 
 ## Phase 5: Deployment & Privacy (The Cloud)
 - [ ] Configure `cloudflared` (Cloudflare Tunnel) in Docker Compose for secure, encrypted remote access.
@@ -36,4 +36,4 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 - [ ] Final end-to-end testing between local Go daemon and external AI (Gemini/ChatGPT).
 
 ---
-*Status: Standardized & Optimized Upgrade | Date: 2026-04-06*
+*Status: Bridge Online (Phase 4 Complete) | Date: 2026-04-15*
