@@ -32,6 +32,7 @@ func NewMCPServer(v *storage.Vessel) *MCPServer {
 
 	// 2. Register the "Search" tool
 	mcpSrv.registerTools()
+	mcpSrv.registerResources()
 
 	return mcpSrv
 }
@@ -54,6 +55,39 @@ func (s *MCPServer) registerTools() {
 		mcp.WithString("vector", mcp.Description("Base64 encoded float32 vector"), mcp.Required()),
 	)
 	s.mcp.AddTool(saveTool, s.handleSave)
+}
+
+func (s *MCPServer) registerResources() {
+	// 1. Define the resource
+	res := mcp.NewResource("shard-link://core",
+		"Core Identity",
+		mcp.WithResourceDescription("Read-only access to user profile and system anchors"),
+	)
+	// 2. Register it with the library
+	s.mcp.AddResource(res, s.handleReadCore)
+}
+
+func (s *MCPServer) handleReadCore(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+	// 1. Get the data from the Vessel
+	shards, err := s.vessel.GetCoreShards()
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. Format it as plain text
+	var body string
+	for _, shard := range shards {
+		body += fmt.Sprintf("[%s]\n%s\n---\n", shard.ID, shard.Content)
+	}
+
+	// 3. Return it using the library's helper
+	return []mcp.ResourceContents{
+		mcp.TextResourceContents{
+			URI:			request.Params.URI,
+			Text:			body,
+			MIMEType: "text/plain",
+		},
+	}, nil
 }
 
 func (s *MCPServer) handleSearch(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
