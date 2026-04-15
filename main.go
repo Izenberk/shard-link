@@ -30,7 +30,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go jan.Run(ctx)		// Run the Janitor in the background
+	go jan.Run(ctx) // Run the Janitor in the background
 
 	// 3. Launch the Bridge
 	srv := mcp.NewMCPServer(v)
@@ -39,13 +39,18 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt)
 
+	publicURL := os.Getenv("PUBLIC_URL")
+	if publicURL == "" {
+		publicURL = "http://localhost:8080" // Fallback for local testing
+	}
+
 	go func() {
-		if err := srv.StartSSE(8080); err != nil {
+		if err := srv.StartSSE(8080, publicURL); err != nil {
 			log.Fatalf("Bridge collapsed: %v", err)
 		}
 	}()
 
 	log.Println("SHARD-LINK Hub is ONLINE.")
-	<-sigChan	// Wait for Ctrl+C
+	<-sigChan // Wait for Ctrl+C
 	log.Println("SHARD-LINK Hub shutting down...")
 }

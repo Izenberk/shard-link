@@ -8,9 +8,12 @@ services:
       - ./data:/app/data
     environment:
       - DATABASE_PATH=/app/data/shard-link.db
+      - PUBLIC_URL=https://hub.izenberk.com
     ports:
       - "8080:8080" # For the MCP SSE server later
     restart: unless-stopped
+    networks:
+      - shard-link-net
 
   tunnel:
     image: cloudflare/cloudflared:latest
@@ -19,3 +22,9 @@ services:
     restart: unless-stopped
     depends_on:
       - hub
+    networks:
+      - shard-link-net
+
+networks:
+  shard-link-net:
+    driver: bridge

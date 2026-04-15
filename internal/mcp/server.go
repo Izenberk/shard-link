@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/izenberk/shard-link/internal/storage"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -117,15 +118,43 @@ func (s *MCPServer) handleSearch(ctx context.Context, request mcp.CallToolReques
 }
 
 // StartSSE launches the production-grade HTTP bridge
-func (s *MCPServer) StartSSE(port int) error {
+func (s *MCPServer) StartSSE(port int, baseURL string) error {
 	// 1. Warp the MCP server logic in an SSE transport
-	sseServer := server.NewSSEServer(s.mcp, server.WithBaseURL(fmt.Sprintf("http://localhost:%d", port)))
+	sseServer := server.NewSSEServer(s.mcp, server.WithBaseURL(baseURL))
 
 	// 2. Setup standard HTTP routing
 	mux := http.NewServeMux()
 
-	// The library provides an SSEHandler that handles the protocol handshake
-	mux.Handle("/sse", sseServer.SSEHandler())
+	// 3. Heartbeat Middleware for Cloudflare/Proxy stability
+	mux.HandleFunc("/sse", func(w http.ResponseWriter, r *http.Request) {
+		// Hand off to the library's SSE handler
+		f, ok := w.(http.Flusher)
+		if !ok {
+			sseServer.SSEHandler().ServeHTTP(w, r)
+			return
+		}
+
+		// Use a context to stop the heartbeat when the request ends
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+
+		go func() {
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					// Send an SSE comment as a heartbeat (ignored by client but keeps connection alive)
+					fmt.Fprintf(w, ": heartbeat\n\n")
+					f.Flush()
+				}
+			}
+		}()
+
+		sseServer.SSEHandler().ServeHTTP(w, r)
+	})
 
 	// The library also provides a MessageHandler for the POST responses
 	mux.Handle("/message", sseServer.MessageHandler())
