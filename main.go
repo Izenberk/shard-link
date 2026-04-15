@@ -14,7 +14,12 @@ import (
 
 func main() {
 	// 1. Ignite the Vessel
-	v, err := storage.NewVessel("data/shard-link.db")
+	dbPath := os.Getenv("DATABASE_PATH")
+	if dbPath == "" {
+		dbPath = "data/shard-link.db"
+	}
+
+	v, err := storage.NewVessel(dbPath)
 	if err != nil {
 		log.Fatalf("Vessel failed to ignite: %v", err)
 	}

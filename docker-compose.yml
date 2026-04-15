@@ -7,8 +7,15 @@ services:
       # Map your local data folder to the container's storage
       - ./data:/app/data
     environment:
-      - DATABASE_PATH=/app/data/vessel.db
+      - DATABASE_PATH=/app/data/shard-link.db
     ports:
       - "8080:8080" # For the MCP SSE server later
+    restart: unless-stopped
 
-  # We'll add cloudflared here in phase 5
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: shard-link_tunnel
+    command: tunnel run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    restart: unless-stopped
+    depends_on:
+      - hub
