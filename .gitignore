@@ -28,6 +28,7 @@ data/
 # Environment
 .env
 .env.*
+certs/
 
 # OS files
 .DS_Store

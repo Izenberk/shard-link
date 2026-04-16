@@ -6,14 +6,20 @@ services:
       # This is the "Dual-Boot Bridge"
       # Map your local data folder to the container's storage
       - ./data:/app/data
+      - ./certs:/app/certs
     environment:
       - DATABASE_PATH=/app/data/shard-link.db
       - PUBLIC_URL=https://hub.izenberk.com
+      - USE_TLS=${USE_TLS}
+      - CA_CERT_PATH=${CA_CERT_PATH}
+      - SERVER_CERT_PATH=${SERVER_CERT_PATH}
+      - SERVER_KEY_PATH=${SERVER_KEY_PATH}
     ports:
       - "8080:8080" # For the MCP SSE server later
     restart: unless-stopped
     networks:
       - shard-link-net
+    
 
   tunnel:
     image: cloudflare/cloudflared:latest
