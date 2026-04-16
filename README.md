@@ -16,19 +16,31 @@ Maintain a persistent "Remembrance" across AI sessions through high-performance 
 
 ## 3. Quick Start (Production)
 
-### Run with Docker
+### 1. Configure the Vessel
+Create a `.env` file in the project root:
 ```bash
-docker compose up -d
+# SHARD-LINK Configuration
+USE_TLS=true
+PUBLIC_URL=https://hub.izenberk.com
+CA_CERT_PATH=/app/certs/ca.crt
+SERVER_CERT_PATH=/app/certs/server.crt
+SERVER_KEY_PATH=/app/certs/server.key
+```
+
+### 2. Ignite the Hub
+```bash
+# Generate certs (see Section 7)
+docker compose up -d --build
 ```
 The Hub will be available at `http://localhost:8080/sse`.
 
-### Connect to AI (MCP)
+### 3. Connect to AI (MCP)
 Add the following to your MCP client configuration (e.g., Claude Desktop):
 ```json
 {
   "mcpServers": {
     "shard-link": {
-      "url": "http://localhost:8080/sse"
+      "url": "https://hub.izenberk.com/sse"
     }
   }
 }
@@ -55,6 +67,34 @@ The Janitor is a background process that maintains memory density by "fading" sh
 - **Active Learning:** Scaffolding provided by Gemini; core logic implemented by Izenberk.
 - **Standardized & Optimized:** Production-grade tiered storage and memory pooling.
 
----
-*Status: MISSION COMPLETE | Date: 2026-04-15*
+## 7. Zero-Trust Security (mTLS)
+Shard-Link enforces **Mutual TLS (mTLS)** for the MCP endpoint. This ensures that only clients holding a certificate signed by your Root CA can interact with the Vessel.
 
+### Generate the Security Mesh
+Run these commands from the project root to generate the necessary keys:
+```bash
+mkdir -p certs
+
+# 1. Root CA (The Authority)
+openssl genrsa -out certs/ca.key 4096
+openssl req -x509 -new -nodes -key certs/ca.key -sha256 -days 1024 -out certs/ca.crt -subj "/CN=ShardLink-CA"
+
+# 2. Server Key/Cert (The Hub)
+openssl genrsa -out certs/server.key 2048
+openssl req -new -key certs/server.key -out certs/server.csr -subj "/CN=hub.izenberk.com"
+openssl x509 -req -in certs/server.csr -CA certs/ca.crt -CAkey certs/ca.key -CAcreateserial -out certs/server.crt -days 500 -sha256
+
+# 3. Client Key/Cert (Your AI Agent)
+openssl genrsa -out certs/client.key 2048
+openssl req -new -key certs/client.key -out certs/client.csr -subj "/CN=AI-Agent-Izenberk"
+openssl x509 -req -in certs/client.csr -CA certs/ca.crt -CAkey certs/ca.key -CAcreateserial -out certs/client.crt -days 500 -sha256
+```
+
+### Connect to AI (mTLS)
+Add your **client certificates** to your AI agent's configuration. For `curl` testing:
+```bash
+curl --cert certs/client.crt --key certs/client.key --cacert certs/ca.crt https://localhost:8080/sse
+```
+
+---
+*Status: MISSION COMPLETE (Security Mesh Deployed) | Date: 2026-04-16*
