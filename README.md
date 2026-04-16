@@ -25,6 +25,7 @@ PUBLIC_URL=https://hub.izenberk.com
 CA_CERT_PATH=/app/certs/ca.crt
 SERVER_CERT_PATH=/app/certs/server.crt
 SERVER_KEY_PATH=/app/certs/server.key
+HUB_API_KEY=shl_live_your_secret_token  # Required for Zero-Proxy Access
 ```
 
 ### 2. Ignite the Hub
@@ -40,7 +41,10 @@ Add the following to your MCP client configuration (e.g., Claude Desktop):
 {
   "mcpServers": {
     "shard-link": {
-      "url": "https://hub.izenberk.com/sse"
+      "url": "https://hub.izenberk.com/sse",
+      "headers": {
+        "X-API-Key": "shl_live_your_secret_token"
+      }
     }
   }
 }
@@ -67,33 +71,23 @@ The Janitor is a background process that maintains memory density by "fading" sh
 - **Active Learning:** Scaffolding provided by Gemini; core logic implemented by Izenberk.
 - **Standardized & Optimized:** Production-grade tiered storage and memory pooling.
 
-## 7. Zero-Trust Security (mTLS)
-Shard-Link enforces **Mutual TLS (mTLS)** for the MCP endpoint. This ensures that only clients holding a certificate signed by your Root CA can interact with the Vessel.
+## 7. Security & Authentication Architecture
 
-### Generate the Security Mesh
-Run these commands from the project root to generate the necessary keys:
+### Why Zero-Proxy Authentication?
+While **Mutual TLS (mTLS)** provides the strongest cryptographic identity, it introduces significant **client-side friction**. Most AI agents (Gemini CLI, Claude Desktop, Cursor) do not natively support client-side certificate configuration for SSE transports.
+
+To resolve this, Shard-Link implements **Defense in Depth**:
+1. **The Edge (Cloudflare):** Tunnels and Access policies protect the Hub from direct exposure.
+2. **The App (Token Middleware):** A required `X-API-Key` header ensures that only authorized agents can access the Vessel.
+3. **The Transport (HTTPS):** Encryption-in-transit ensures that tokens cannot be sniffed by middle-men.
+
+This "Zero-Proxy" approach allows for **native compatibility** with all AI tools without needing local "Keyholder" scripts or sidecar proxies.
+
+### Legacy mTLS Setup (Optional)
+If you require maximum security and are using a custom client that supports mTLS:
 ```bash
-mkdir -p certs
-
-# 1. Root CA (The Authority)
-openssl genrsa -out certs/ca.key 4096
-openssl req -x509 -new -nodes -key certs/ca.key -sha256 -days 1024 -out certs/ca.crt -subj "/CN=ShardLink-CA"
-
-# 2. Server Key/Cert (The Hub)
-openssl genrsa -out certs/server.key 2048
-openssl req -new -key certs/server.key -out certs/server.csr -subj "/CN=hub.izenberk.com"
-openssl x509 -req -in certs/server.csr -CA certs/ca.crt -CAkey certs/ca.key -CAcreateserial -out certs/server.crt -days 500 -sha256
-
-# 3. Client Key/Cert (Your AI Agent)
-openssl genrsa -out certs/client.key 2048
-openssl req -new -key certs/client.key -out certs/client.csr -subj "/CN=AI-Agent-Izenberk"
-openssl x509 -req -in certs/client.csr -CA certs/ca.crt -CAkey certs/ca.key -CAcreateserial -out certs/client.crt -days 500 -sha256
-```
-
-### Connect to AI (mTLS)
-Add your **client certificates** to your AI agent's configuration. For `curl` testing:
-```bash
-curl --cert certs/client.crt --key certs/client.key --cacert certs/ca.crt https://localhost:8080/sse
+# See Section 7 archives for certificate generation commands
+# Requires certificates to be mounted in /app/certs
 ```
 
 ---
