@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+	"crypto/tls"
+	"crypto/x509"
+	"os"
 
 	"github.com/izenberk/shard-link/internal/storage"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -15,6 +18,12 @@ import (
 type MCPServer struct {
 	vessel 	*storage.Vessel
 	mcp 		*server.MCPServer
+}
+
+type TLSConfig struct {
+	CACertPath			string
+	ServerCertPath	string
+	ServerKeyPath		string
 }
 
 func NewMCPServer(v *storage.Vessel) *MCPServer {
@@ -150,7 +159,7 @@ func (s *MCPServer) handleSearchText(ctx context.Context, request mcp.CallToolRe
 	return mcp.NewToolResultText(response), nil
 }
 
-// StartSSE launches the production-grade HTTP bridge
+// StartSSE launches the production-grade HTTP bridge (Switch to StartSSESecure).
 func (s *MCPServer) StartSSE(port int, baseURL string) error {
 	// 1. Warp the MCP server logic in an SSE transport
 	sseServer := server.NewSSEServer(s.mcp, server.WithBaseURL(baseURL))
@@ -219,4 +228,67 @@ func (s *MCPServer) handleSave(ctx context.Context, request mcp.CallToolRequest)
 	}
 
 	return mcp.NewToolResultText(fmt.Sprintf("Memory saved: %s", id)), nil
+}
+
+// StartSSESecure is the mTLS-hardened version of the bridge
+func (s *MCPServer) StartSSESecure(port int, baseURL string, cfg TLSConfig) error {
+	// 1. Setup the Root CA Pool
+	caCert, err := os.ReadFile(cfg.CACertPath)
+	if err != nil {
+		return fmt.Errorf("failed to read CA cert: %v", err)
+	}
+
+	caCertPool := x509.NewCertPool()
+	if !caCertPool.AppendCertsFromPEM(caCert) {
+		return fmt.Errorf("failed to append CA cert to pool")
+	}
+
+	// 2. Configure TLS with "Zero-Trust" enforcement
+	tlsConfig := &tls.Config{
+		ClientCAs: 	caCertPool,
+		ClientAuth: tls.RequireAndVerifyClientCert,		// CRITICAL: This enforces mTLS
+		MinVersion: tls.VersionTLS12,
+	}
+
+	// 3. Setup the SSE Transport and Mux
+	sseServer := server.NewSSEServer(s.mcp, server.WithBaseURL(baseURL))
+	mux := http.NewServeMux()
+	mux.HandleFunc("/sse", func(w http.ResponseWriter, r *http.Request) {
+		f, ok := w.(http.Flusher)
+		if !ok {
+			sseServer.SSEHandler().ServeHTTP(w, r)
+			return
+		}
+
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+
+		go func() {
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					fmt.Fprintf(w, ": heartbeat\n\n")
+					f.Flush()
+				}
+			}
+		}()
+
+		sseServer.SSEHandler().ServeHTTP(w, r)
+	})
+
+	mux.Handle("/message", sseServer.MessageHandler())
+
+	// 4. Initialize the Secure Server
+	srv := &http.Server{
+		Addr:				fmt.Sprintf(":%d", port),
+		Handler: 		mux,
+		TLSConfig: 	tlsConfig,
+	}
+
+	fmt.Printf("Shard-Link mTLS Bridge ignited on :%d/sse (SECURE)\n", port)
+	return srv.ListenAndServeTLS(cfg.ServerCertPath, cfg.ServerKeyPath)
 }

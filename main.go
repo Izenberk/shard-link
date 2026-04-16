@@ -44,9 +44,23 @@ func main() {
 		publicURL = "http://localhost:8080" // Fallback for local testing
 	}
 
+	// Inside your main function in main.go
+	useTLS := os.Getenv("USE_TLS") == "true"
+
 	go func() {
-		if err := srv.StartSSE(8080, publicURL); err != nil {
-			log.Fatalf("Bridge collapsed: %v", err)
+		if useTLS {
+			cfg := mcp.TLSConfig{
+				CACertPath: 				os.Getenv("CA_CERT_PATH"),
+				ServerCertPath: 		os.Getenv("SERVER_CERT_PATH"),
+				ServerKeyPath: 			os.Getenv("SERVER_KEY_PATH"),
+			}
+			if err := srv.StartSSESecure(8080, publicURL, cfg); err != nil {
+				log.Fatalf("Secure Bridge collapsed: %v", err)
+			}
+		} else {
+			if err := srv.StartSSE(8080, publicURL); err != nil {
+				log.Fatalf("Bridge collapsed: %v", err)
+			}
 		}
 	}()
 
