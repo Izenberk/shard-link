@@ -28,12 +28,22 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 - [x] Setup the MCP JSON-RPC server over SSE (Server-Sent Events).
 - [x] Implement `mcp.ListTools` (to expose memory search as a tool).
 - [x] Implement `mcp.CallTool` to execute `FindResonant` searches.
-- [x] Implement `mcp.ListResources` (to expose the "Core Shard" as a system resource).
+- [x] Implement `mcp.ListResources" (to expose the "Core Shard" as a system resource).
 
 ## Phase 5: Deployment & Privacy (The Cloud)
 - [x] Configure `cloudflared` (Cloudflare Tunnel) in Docker Compose for secure, encrypted remote access.
 - [x] Implement mutual TLS (mTLS) for the MCP endpoint.
 - [x] Final end-to-end testing between local Go container and local AI agent.
+
+## Phase 6: Scaling & Multi-User Support (The Expansion)
+- [ ] Implement the **Repository Pattern** to abstract the storage layer.
+- [ ] Migrate from SQLite to **PostgreSQL + pgvector** for high-concurrency support.
+- [ ] Update the `Vessel` to support multi-tenant shard ownership (UserID field).
+
+## Phase 7: Standalone Intelligence (Local Inference)
+- [ ] Integrate a **Local Embedding Tool** (e.g., Ollama or a Go-native wrapper).
+- [ ] Implement an `Embedder` interface to swap between local and cloud (OpenAI/Gemini) providers.
+- [ ] Auto-generate embeddings during `save_memory` without external dependencies.
 
 ---
 *Status: MISSION COMPLETE (Security Mesh Deployed) | Date: 2026-04-16*
