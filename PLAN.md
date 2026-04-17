@@ -31,14 +31,14 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 - [x] Implement `mcp.ListResources` (to expose the "Core Shard" as a system resource).
 
 ## Phase 5: Deployment & Privacy (The Cloud)
-- [x] Configure `cloudflared` (Cloudflare Tunnel) in Docker Compose for secure, encrypted remote access.
-- [x] Implement mutual TLS (mTLS) for the MCP endpoint.
+- [x] Configure `cloudflared` (Cloudflare Tunnel) in Docker Compose.
+- [x] Implement mutual TLS (mTLS) for the MCP endpoint. (Refactored to Token-Auth in Phase 6).
 - [x] Final end-to-end testing between local Go container and local AI agent.
 
 ## Phase 6: Zero-Proxy Access (Authentication Refactor)
-- [ ] Implement **API Key / Token Middleware** in the MCP server.
-- [ ] Refactor `StartSSE` to make mTLS optional in favor of **Defense in Depth** (Token + HTTPS).
-- [ ] Update `settings.json` with custom `headers` for direct, secure remote connection.
+- [x] Implement **API Key / Token Middleware** in the MCP server.
+- [x] Refactor `StartSSE` to remove mTLS debt in favor of **Defense in Depth** (Token + HTTPS).
+- [x] Update `settings.json` with custom `headers` for direct, secure remote connection.
 
 ## Phase 7: Scaling & Multi-User Support (The Expansion)
 - [ ] Implement the **Repository Pattern** to abstract the storage layer.
@@ -51,4 +51,4 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 - [ ] Auto-generate embeddings during `save_memory` without external dependencies.
 
 ---
-*Status: MISSION COMPLETE (Security Mesh Deployed) | Date: 2026-04-16*
+*Status: MISSION COMPLETE (Zero-Proxy Access Deployed) | Date: 2026-04-17*

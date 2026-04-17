@@ -20,23 +20,19 @@ Maintain a persistent "Remembrance" across AI sessions through high-performance 
 Create a `.env` file in the project root:
 ```bash
 # SHARD-LINK Configuration
-USE_TLS=true
 PUBLIC_URL=https://hub.izenberk.com
-CA_CERT_PATH=/app/certs/ca.crt
-SERVER_CERT_PATH=/app/certs/server.crt
-SERVER_KEY_PATH=/app/certs/server.key
 HUB_API_KEY=shl_live_your_secret_token  # Required for Zero-Proxy Access
+CLOUDFLARE_TUNNEL_TOKEN=your_token_here
 ```
 
 ### 2. Ignite the Hub
 ```bash
-# Generate certs (see Section 7)
 docker compose up -d --build
 ```
-The Hub will be available at `http://localhost:8080/sse`.
+The Hub will be available at `http://localhost:8080/sse` (Internal) and through your Cloudflare URL (External).
 
 ### 3. Connect to AI (MCP)
-Add the following to your MCP client configuration (e.g., Claude Desktop):
+Add the following to your MCP client configuration (e.g., Gemini CLI, Claude Desktop):
 ```json
 {
   "mcpServers": {
@@ -73,22 +69,13 @@ The Janitor is a background process that maintains memory density by "fading" sh
 
 ## 7. Security & Authentication Architecture
 
-### Why Zero-Proxy Authentication?
-While **Mutual TLS (mTLS)** provides the strongest cryptographic identity, it introduces significant **client-side friction**. Most AI agents (Gemini CLI, Claude Desktop, Cursor) do not natively support client-side certificate configuration for SSE transports.
-
-To resolve this, Shard-Link implements **Defense in Depth**:
-1. **The Edge (Cloudflare):** Tunnels and Access policies protect the Hub from direct exposure.
+### Zero-Proxy Authentication
+Shard-Link implements **Defense in Depth** to ensure security without requiring local sidecars or mTLS proxies:
+1. **The Edge (Cloudflare):** Tunnels protect the Hub from direct exposure.
 2. **The App (Token Middleware):** A required `X-API-Key` header ensures that only authorized agents can access the Vessel.
-3. **The Transport (HTTPS):** Encryption-in-transit ensures that tokens cannot be sniffed by middle-men.
+3. **The Transport (HTTPS):** Encryption-in-transit ensures that tokens cannot be sniffed.
 
-This "Zero-Proxy" approach allows for **native compatibility** with all AI tools without needing local "Keyholder" scripts or sidecar proxies.
-
-### Legacy mTLS Setup (Optional)
-If you require maximum security and are using a custom client that supports mTLS:
-```bash
-# See Section 7 archives for certificate generation commands
-# Requires certificates to be mounted in /app/certs
-```
+This allows for **native compatibility** with all AI tools (Gemini CLI, Claude, Cursor) by simply providing the secret header.
 
 ---
-*Status: MISSION COMPLETE (Security Mesh Deployed) | Date: 2026-04-16*
+*Status: MISSION COMPLETE (Zero-Proxy Access Deployed) | Date: 2026-04-17*
