@@ -5,7 +5,10 @@ services:
     volumes:
       # This is the "Dual-Boot Bridge"
       - ./data:/app/data
+    depends_on:
+      - db
     environment:
+      - DATABASE_URL=postgres://sharduser:shardpass@db:5432/shardlink?sslmode=disable
       - DATABASE_PATH=/app/data/shard-link.db
       - PUBLIC_URL=https://hub.izenberk.com
       - HUB_API_KEY=${HUB_API_KEY}
@@ -14,7 +17,21 @@ services:
     restart: unless-stopped
     networks:
       - shard-link-net
-    
+
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: shard-link_db
+    ports:
+      - "5434:5432"
+    environment:
+      - POSTGRES_DB=shardlink
+      - POSTGRES_USER=sharduser
+      - POSTGRES_PASSWORD=shardpass
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - shard-link-net
 
   tunnel:
     image: cloudflare/cloudflared:latest

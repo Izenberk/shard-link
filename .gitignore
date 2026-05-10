@@ -24,6 +24,7 @@ go.work
 *.sqlite
 *.sqlite3
 data/
+postgres_data/
 
 # Environment
 .env

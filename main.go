@@ -20,12 +20,28 @@ func main() {
 	}
 
 	// 2. Ignite the Vessel
-	dbPath := os.Getenv("DATABASE_PATH")
-	if dbPath == "" {
-		dbPath = "data/shard-link.db"
+	var v storage.Repository
+	var err error
+
+	connStr := os.Getenv("DATABASE_URL")
+
+	if connStr != "" {
+		v, err = storage.NewPostgresVessel(context.Background(), connStr)
+		if err == nil {
+			log.Println("SHARD-LINK: PostgreSQL Vessel Ignited (High Performance)")
+		}
+	} else {
+		// Local-First SQLite mode
+		dbPath := os.Getenv("DATABASE_PATH")
+		if dbPath == "" {
+			dbPath = "data/shard-link.db"
+		}
+		v, err = storage.NewVessel(dbPath)
+		if err == nil {
+			log.Println("SHARD-LINK: SQLite Vessel Ignited (Single-User Mode)")
+		}
 	}
 
-	v, err := storage.NewVessel(dbPath)
 	if err != nil {
 		log.Fatalf("Vessel failed to ignite: %v", err)
 	}
@@ -36,7 +52,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go jan.Run(ctx) 
+	go jan.Run(ctx)
 
 	// 4. Launch the Authenticated Bridge
 	srv := mcp.NewMCPServer(v, apiKey)
