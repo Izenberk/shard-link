@@ -40,10 +40,11 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 - [x] Refactor `StartSSE` to remove mTLS debt in favor of **Defense in Depth** (Token + HTTPS).
 - [x] Update `settings.json` with custom `headers` for direct, secure remote connection.
 
-## Phase 7: Scaling & Multi-User Support (The Expansion)
+## Phase 7: High-Performance Scaling (PostgreSQL & pgvector)
 - [ ] Implement the **Repository Pattern** to abstract the storage layer.
-- [ ] Migrate from SQLite to **PostgreSQL + pgvector** for high-concurrency support.
-- [ ] Update the `Vessel` to support multi-tenant shard ownership (UserID field).
+- [ ] Migrate from SQLite to **PostgreSQL + pgvector** to offload 1536-D math to SQL (SIMD).
+- [ ] Refactor Janitor to use a **Composite Survival Score**: `(Links * Centrality) / (Time^Decay)`.
+- [ ] Update the `Vessel` to support **Multi-Tenant** shard ownership (UserID field).
 
 ## Phase 8: Standalone Intelligence (Local Inference)
 - [ ] Integrate a **Local Embedding Tool** (e.g., Ollama or a Go-native wrapper).
