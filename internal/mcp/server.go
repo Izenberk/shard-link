@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -13,12 +14,12 @@ import (
 )
 
 type MCPServer struct {
-	vessel 	*storage.Vessel
+	vessel 	storage.Repository
 	mcp 		*server.MCPServer
 	apiKey	string
 }
 
-func NewMCPServer(v *storage.Vessel, apiKey string) *MCPServer {
+func NewMCPServer(v storage.Repository, apiKey string) *MCPServer {
 	// 1. Create the base MCP server
 	s := server.NewMCPServer(
 		"Shard-Link Hub",
@@ -27,11 +28,17 @@ func NewMCPServer(v *storage.Vessel, apiKey string) *MCPServer {
 		server.WithToolCapabilities(true),
 	)
 
-	return &MCPServer{
+	mcpSrv := &MCPServer{
 		vessel:	v,
 		mcp:		s,
 		apiKey: apiKey,
 	}
+
+	// 2. Register tools and resources BEFORE return
+	mcpSrv.RegisterTools()
+	mcpSrv.RegisterResources()
+
+	return mcpSrv
 }
 
 func (s *MCPServer) withAuth(next http.Handler) http.Handler {
@@ -43,15 +50,17 @@ func (s *MCPServer) withAuth(next http.Handler) http.Handler {
 		}
 
 		if r.Header.Get("X-API-Key") != s.apiKey {
+			log.Printf("[Auth] Denied %s %s from %s (invalid key)", r.Method, r.URL.Path, r.RemoteAddr)
 			http.Error(w, "Unauthorized: Invalid Shard Access Key", http.StatusUnauthorized)
 			return
 		}
 
+		log.Printf("[Auth] Granted %s %s", r.Method, r.URL.Path)
 		next.ServeHTTP(w, r)
 	})
 }
 
-func (s *MCPServer) registerTools() {
+func (s *MCPServer) RegisterTools() {
 	// Tool 1: search_memory
 	searchTool := mcp.NewTool("search_memory",
 		mcp.WithDescription("Search long-term memory using semantic resonance (vector search)"),
@@ -80,7 +89,7 @@ func (s *MCPServer) registerTools() {
 }
 
 
-func (s *MCPServer) registerResources() {
+func (s *MCPServer) RegisterResources() {
 	// 1. Define the resource
 	res := mcp.NewResource("shard-link://core",
 		"Core Identity",
@@ -92,7 +101,7 @@ func (s *MCPServer) registerResources() {
 
 func (s *MCPServer) handleReadCore(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
 	// 1. Get the data from the Vessel
-	shards, err := s.vessel.GetCoreShards()
+	shards, err := s.vessel.GetCoreShards(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +134,7 @@ func (s *MCPServer) handleSearch(ctx context.Context, request mcp.CallToolReques
 	}
 
 	// 3. Query the Vessel
-	results, err := s.vessel.FindResonant(queryVec, limit)
+	results, err := s.vessel.FindResonant(ctx, queryVec, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +154,7 @@ func (s *MCPServer) handleSearchText(ctx context.Context, request mcp.CallToolRe
 	limit := int(request.GetFloat("limit", 5))
 
 	// 2. Query the Vessel
-	results, err := s.vessel.FindText(query, limit)
+	results, err := s.vessel.FindText(ctx, query, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -183,13 +192,14 @@ func (s *MCPServer) StartSSE(port int, baseURL string) error {
 		defer cancel()
 
 		go func() {
-			ticker := time.NewTicker(30 * time.Second)
+			ticker := time.NewTicker(15 * time.Second) // Reduced for Cloudflare stability
 			defer ticker.Stop()
 			for {
 				select {
 				case <-ctx.Done():
 					return
 				case <-ticker.C:
+					// Send an SSE comment as a heartbeat (ignored by client but keeps connection alive)
 					fmt.Fprintf(w, ": heartbeat\n\n")
 					f.Flush()
 				}
@@ -224,7 +234,7 @@ func (s *MCPServer) handleSave(ctx context.Context, request mcp.CallToolRequest)
 		Vector: 		vec,
 	}
 
-	if err := s.vessel.SaveShard(shard); err != nil {
+	if err := s.vessel.SaveShard(ctx, shard); err != nil {
 		return nil, err
 	}
 

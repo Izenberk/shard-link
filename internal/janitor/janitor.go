@@ -14,12 +14,12 @@ type Scorer interface {
 
 // Janitor handles background size management.
 type Janitor struct {
-	vessel 		*storage.Vessel
+	vessel 		storage.Repository
 	interval 	time.Duration
 	maxSize 	int		// Maximum number if shards before eviction starts
 }
 
-func NewJanitor(v *storage.Vessel, interval time.Duration, maxSize int) *Janitor {
+func NewJanitor(v storage.Repository, interval time.Duration, maxSize int) *Janitor {
 	return &Janitor {
 		vessel: v,
 		interval: interval,
@@ -36,13 +36,13 @@ func (j *Janitor) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return		// Context cancelled, stop the Janitor
 		case <-ticker.C:
-			j.performCleanup()
+			j.performCleanup(ctx)
 		}
 	}
 }
 
-func (j *Janitor) performCleanup() {
-	count, err := j.vessel.GetCount()
+func (j *Janitor) performCleanup(ctx context.Context) {
+	count, err := j.vessel.GetCount(ctx)
 	if err != nil {
 		// In a real app, we would log this to a structured logger
 		return
@@ -52,12 +52,12 @@ func (j *Janitor) performCleanup() {
 		return		// Vessel is within safe limits
 	}
 	overage := count - j.maxSize
-	candidates, err := j.vessel.GetEvictionCandidates(overage)
+	candidates, err := j.vessel.GetEvictionCandidates(ctx, overage)
 	if err != nil {
 		return
 	}
 
 	for _, id := range candidates {
-		_ = j.vessel.ArchiveShard(id)
+		_ = j.vessel.ArchiveShard(ctx, id)
 	}
 }

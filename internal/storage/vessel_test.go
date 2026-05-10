@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"encoding/binary"
 	"math"
 	"testing"
@@ -23,6 +24,8 @@ func TestVessel_Resonance(t *testing.T) {
 	}
 	defer v.Close()
 
+	ctx := context.Background()
+
 	// 2. Prepare test data
 	// Vector A: [1.0, 0.0]
 	// Vector B: [0.0, 1.0]
@@ -32,16 +35,16 @@ func TestVessel_Resonance(t *testing.T) {
 	s1 := Shard{ID: "shard-a", Category: "memory", Content: "Horizontal", Vector: vecA}
 	s2 := Shard{ID: "shard-b", Category: "memory", Content: "Vertical", Vector: vecB}
 
-	if err := v.SaveShard(s1); err != nil {
+	if err := v.SaveShard(ctx, s1); err != nil {
 		t.Fatal(err)
 	}
-	if err := v.SaveShard(s2); err != nil {
+	if err := v.SaveShard(ctx, s2); err != nil {
 		t.Fatal(err)
 	}
 
 	// 3.Search using Vector A
 	// It should return shard-a as the top result (distance 0.0)
-	results, err := v.FindResonant(vecA, 1)
+	results, err := v.FindResonant(ctx, vecA, 1)
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
