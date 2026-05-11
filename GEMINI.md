@@ -5,7 +5,7 @@ Shard-Link is a high-performance context engine designed to provide "long-term m
 
 ## 2. Technical Stack
 - **Backend:** Go (Golang) 1.22+ (Strict SOLID & Production standards).
-- **Database:** SQLite + `sqlite-vec` (Vector Search) + JSONB metadata.
+- **Database:** PostgreSQL + `pgvector` (Vector Search) + JSONB metadata.
 - **Protocol:** MCP (Model Context Protocol) for tool-based orchestration.
 
 ## 3. Domain Language & Logic

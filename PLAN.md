@@ -41,10 +41,10 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 - [x] Update `settings.json` with custom `headers` for direct, secure remote connection.
 
 ## Phase 7: High-Performance Scaling (PostgreSQL & pgvector)
-- [ ] Implement the **Repository Pattern** to abstract the storage layer.
-- [ ] Migrate from SQLite to **PostgreSQL + pgvector** to offload 1536-D math to SQL (SIMD).
-- [ ] Refactor Janitor to use a **Composite Survival Score**: `(Links * Centrality) / (Time^Decay)`.
-- [ ] Update the `Vessel` to support **Multi-Tenant** shard ownership (UserID field).
+- [x] Implement the **Repository Pattern** to abstract the storage layer.
+- [x] Migrate from SQLite to **PostgreSQL + pgvector** to offload 1536-D math to SQL (SIMD).
+- [x] Refactor Janitor to use a **Composite Survival Score**: `(Links * Centrality) / (Time^Decay)`.
+- [x] Update the `Vessel` to support **Multi-Tenant** shard ownership (UserID field).
 
 ## Phase 8: Standalone Intelligence (Local Inference)
 - [ ] Integrate a **Local Embedding Tool** (e.g., Ollama or a Go-native wrapper).
@@ -52,4 +52,4 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 - [ ] Auto-generate embeddings during `save_memory` without external dependencies.
 
 ---
-*Status: MISSION COMPLETE (Zero-Proxy Access Deployed) | Date: 2026-04-17*
+*Status: MISSION COMPLETE (Postgres Scaling Deployed) | Date: 2026-05-11*

@@ -1,9 +1,33 @@
-The audio transcript highlights two major architectural flaws in the Shard-Link project and proposes specific technical solutions to resolve them:
+# Shard-Link: Improvements & Optimization Track
 
-**1. Flawed "Janitor" Eviction Logic**
-*   **The Problem:** The current deterministic eviction logic incorrectly prioritizes recency over structural importance. Because the system filters out shards based on their `last_used` timestamp before evaluating their `link_count`, it risks deleting older "load-bearing" shards that hold the context together, while allowing newly created but irrelevant "orphan" shards to survive. This rigid, step-by-step deletion process completely neutralizes the intended "Resonance Decay Half-Life" design.
-*   **The Solution:** The speakers suggest replacing the rigid filtering steps with a dynamic **"Composite Survival Score"**. By using a mathematical formula that multiplies the base resonance by a decay factor (half-life) and adds the link count weighted by centrality, the system will naturally protect older, highly-connected foundational data while swiftly deleting irrelevant context.
+This document tracks the resolution of architectural bottlenecks and outlines future performance targets.
 
-**2. Severe Performance Bottleneck in Vector Math**
-*   **The Problem:** Attempting to calculate vector cosine distances manually within the Go application layer (to avoid CGO dependencies) creates a critical memory bottleneck. Auto-linking requires the system to pull thousands of 1536-dimensional vectors (about 6KB each) from SQLite into Go's memory. Under concurrent AI requests, this injects hundreds of megabytes into the heap instantly, forcing the Go Garbage Collector (GC) into "stop-the-world" pauses that completely ruin the project's sub-5ms retrieval goal.
-*   **The Solution:** The logic must be pushed back to the database. By running a SQL query that utilizes `sqlite-vec`'s hardware SIMD acceleration to calculate the cosine distance directly in the database (e.g., using a `LIMIT 3` clause), Go will only receive three tiny IDs instead of massive floating-point arrays. This prevents memory bloat, stabilizes the garbage collector, and easily achieves the desired retrieval speeds.
+## ✅ Resolved: Vector Math Performance Bottleneck (2026-05-10)
+**The Problem:** Calculating 1536-D vector cosine distances in the Go application layer was causing massive heap allocations (6KB per vector) and triggering "stop-the-world" Garbage Collector pauses.
+**The Solution:** Migrated to **PostgreSQL + pgvector**. 
+- Vector math is now offloaded to the database using native SQL SIMD operators (`<=>`).
+- Go only receives the final IDs, drastically reducing heap pressure and stabilizing retrieval times to sub-5ms.
+
+## ✅ Resolved: Flawed Janitor Eviction Logic (2026-05-10)
+**The Problem:** Deterministic recency filtering was deleting "load-bearing" old shards and keeping irrelevant new "orphan" shards.
+**The Solution:** Implemented the **Composite Survival Score**.
+- `Score = (Links * Centrality) / (Time^Decay)`
+- This protects foundational data (high links/centrality) regardless of age, while naturally fading irrelevant context.
+
+## 🚀 Current Focus: Multi-Tenancy & Local Inference
+With the high-performance core stable, the next improvements target scale and privacy.
+
+### 1. Multi-Tenant Isolation
+- **Goal:** Support isolated memory vessels for multiple users within the same Postgres instance.
+- **Requirement:** Add `UserID` indexing to the `shards` table and enforce ownership checks in the Repository layer.
+
+### 2. Phase 8: Local Embedding Pipeline
+- **Goal:** Eliminate the dependency on external embedding APIs.
+- **Requirement:** Integrate a local embedder (e.g., Ollama or Go-native `local-embed`) to handle the 1536-D generation during `save_memory`.
+
+### 3. Janitor Refinement: Graph Centrality
+- **Goal:** More accurately identify "hub" shards.
+- **Requirement:** Implement a lightweight PageRank-inspired centrality check during the scoring phase to ensure the Knowledge Mesh remains structurally sound.
+
+---
+*Last Updated: 2026-05-11*

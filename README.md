@@ -7,9 +7,9 @@ Maintain a persistent "Remembrance" across AI sessions through high-performance 
 
 ## 2. Technical Stack
 - **Backend:** Go (Golang) 1.26+ (Strict SOLID standards).
-- **Database:** SQLite (via `ncruces/go-sqlite3` WASM/wasm2go driver).
-- **Resonance Engine:** Manual Go-based implementation of `vec_distance_cosine` (Refactoring to SQL-SIMD).
-- **Performance:** `sync.Pool` for vector buffer recycling (NTFS/ExFAT optimization).
+- **Database:** PostgreSQL + `pgvector` (Production-grade vector search).
+- **Resonance Engine:** Native SQL SIMD operators (`<=>`) for cosine distance.
+- **Performance:** Repository Pattern for storage abstraction; SIMD-accelerated retrieval.
 - **Metadata:** JSONB (Binary JSON) for flexible "Ego" state.
 - **Protocol:** MCP (Model Context Protocol) over SSE/JSON-RPC.
 - **Deployment:** Multi-stage Distroless Docker image for Ubuntu/Windows 11 dual-boot.
@@ -23,6 +23,7 @@ Create a `.env` file in the project root:
 PUBLIC_URL=https://hub.izenberk.com
 HUB_API_KEY=shl_live_your_secret_token  # Required for Zero-Proxy Access
 CLOUDFLARE_TUNNEL_TOKEN=your_token_here
+POSTGRES_PASSWORD=your_secure_password
 ```
 
 ### 2. Ignite the Hub
@@ -52,7 +53,7 @@ Add the following to your MCP client configuration (e.g., Gemini CLI, Claude Des
 - **The Basement:** Tiered archival storage (`shards_archive`) for evicted memories.
 - **Shard Bonds:** A relational "Knowledge Mesh" where shards are linked by cosine similarity (> 0.85).
 - **Dependency Immunity:** Shards strongly bonded to active context are protected from archival.
-- **The Vessel:** A hybrid relational-document storage model in a single SQLite file.
+- **The Vessel:** A high-performance PostgreSQL repository using pgvector for 1536-D math.
 
 ## 5. The Janitor (Size Management)
 The Janitor maintains memory density by "fading" shards to the Basement using a **Composite Survival Score**.
@@ -77,5 +78,10 @@ Shard-Link implements **Defense in Depth** to ensure security without requiring 
 2. **The App (Token Middleware):** A required `X-API-Key` header ensures only authorized agents can access the Vessel.
 3. **The Transport (HTTPS):** Encryption-in-transit ensures that tokens cannot be sniffed.
 
+## 8. Documentation & Roadmap
+- **[Implementation Roadmap (PLAN.md)](./PLAN.md):** Track the phase-by-phase progress of the Hub.
+- **[Improvements Track (IMPROVEMENT.md)](./IMPROVEMENT.md):** Architectural bottlenecks and performance optimization logs.
+- **[Core Context (GEMINI.md)](./GEMINI.md):** Foundational mandates and domain logic for AI agents.
+
 ---
-*Status: MISSION COMPLETE (Zero-Proxy Access Deployed) | Date: 2026-04-17*
+*Status: MISSION COMPLETE (Postgres Scaling Deployed) | Date: 2026-05-11*
