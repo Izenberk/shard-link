@@ -46,7 +46,14 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 - [x] Refactor Janitor to use a **Composite Survival Score**: `(Links * Centrality) / (Time^Decay)`.
 - [x] Update the `Vessel` to support **Multi-Tenant** shard ownership (UserID field).
 
-## Phase 8: Standalone Intelligence (Local Inference)
+## Phase 8: The Knowledge Mesh (GraphDB Integration)
+- [ ] **Infrastructure Swap**: Add Neo4j/Memgraph to `docker-compose.yml` with APOC/GDS support.
+- [ ] **Graph Repository**: Implement a `GraphRepository` in Go to map Shards to Nodes and Bonds to Typed Edges (`REFINES`, `DEPENDS_ON`, `CONTEXT_OF`).
+- [ ] **Native Centrality**: Refactor the Janitor to use Cypher-based Centrality (Node Degree) for the Composite Survival Score.
+- [ ] **Multi-Hop Retrieval**: Implement a `search_graph` MCP tool to enable path-traversal (e.g., "Find the decision chain for feature X").
+- [ ] **Visual Ego**: Expose a read-only graph visualizer to monitor the "Ego Anchor" and memory clusters.
+
+## Phase 9: Standalone Intelligence (Local Inference)
 - [ ] Integrate a **Local Embedding Tool** (e.g., Ollama or a Go-native wrapper).
 - [ ] Implement an `Embedder` interface to swap between local and cloud providers.
 - [ ] Auto-generate embeddings during `save_memory` without external dependencies.
