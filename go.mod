@@ -6,6 +6,7 @@ require (
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/mark3labs/mcp-go v0.47.1
 	github.com/ncruces/go-sqlite3 v0.33.2
+	github.com/neo4j/neo4j-go-driver/v5 v5.28.4
 )
 
 require (

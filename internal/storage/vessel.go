@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"time"
 
 	"github.com/ncruces/go-sqlite3"
 )
@@ -218,7 +219,7 @@ func (v *Vessel) ArchiveShard(ctx context.Context, id string) error {
 }
 
 func (v *Vessel) GetAllShards(ctx context.Context) ([]Shard, error) {
-	const query = `SELECT id, category, content, vector, metadata FROM shards`
+	const query = `SELECT id, category, content, vector, metadata, last_used, created_at FROM shards`
 	stmt, _, err := v.conn.Prepare(query)
 	if err != nil {
 		return nil, err
@@ -227,12 +228,17 @@ func (v *Vessel) GetAllShards(ctx context.Context) ([]Shard, error) {
 
 	var shards []Shard
 	for stmt.Step() {
+		lu, _ := time.Parse(time.RFC3339, stmt.ColumnText(5))
+		ca, _ := time.Parse(time.RFC3339, stmt.ColumnText(6))
+
 		shards = append(shards, Shard{
-			ID:       stmt.ColumnText(0),
-			Category: stmt.ColumnText(1),
-			Content:  stmt.ColumnText(2),
-			Vector:   stmt.ColumnBlob(3, nil),
-			Metadata: stmt.ColumnBlob(4, nil),
+			ID:        stmt.ColumnText(0),
+			Category:  stmt.ColumnText(1),
+			Content:   stmt.ColumnText(2),
+			Vector:    stmt.ColumnBlob(3, nil),
+			Metadata:  stmt.ColumnBlob(4, nil),
+			LastUsed:  lu,
+			CreatedAt: ca,
 		})
 	}
 	return shards, stmt.Err()
@@ -287,8 +293,8 @@ func (v *Vessel) DeleteShard(id string) error {
 	return stmt.Exec()
 }
 
-// CreateBond manually links two shards.
-func (v *Vessel) CreateBond(b ShardBond) error {
+// SaveBond manually links two shards.
+func (v *Vessel) SaveBond(ctx context.Context, b ShardBond) error {
 	const query = `INSERT OR REPLACE INTO shard_bonds (from_id, to_id, weight) VALUES (?, ?, ?)`
 	stmt, _, err := v.conn.Prepare(query)
 	if err != nil {
@@ -301,6 +307,25 @@ func (v *Vessel) CreateBond(b ShardBond) error {
 	stmt.BindFloat(3, b.Weight)
 
 	return stmt.Exec()
+}
+
+func (v *Vessel) GetAllBonds(ctx context.Context) ([]ShardBond, error) {
+	const query = `SELECT from_id, to_id, weight FROM shard_bonds`
+	stmt, _, err := v.conn.Prepare(query)
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+
+	var bonds []ShardBond
+	for stmt.Step() {
+		bonds = append(bonds, ShardBond{
+			FromID: stmt.ColumnText(0),
+			ToID:   stmt.ColumnText(1),
+			Weight: stmt.ColumnFloat(2),
+		})
+	}
+	return bonds, stmt.Err()
 }
 
 func (v *Vessel) Close() error {
@@ -326,6 +351,10 @@ func decodeVector(b []byte) []float32 {
 		v[i] = math.Float32frombits(bits)
 	}
 	return v
+}
+
+func putFloat32(b []byte, f float32) {
+	binary.LittleEndian.PutUint32(b, math.Float32bits(f))
 }
 
 func cosineSimilarity(a, b []float32) float64 {

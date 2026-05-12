@@ -2,7 +2,10 @@ package storage
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -54,7 +57,7 @@ func (v *PostgresVessel) SaveShard(ctx context.Context, s Shard) error {
 
 func (v *PostgresVessel) FindResonant(ctx context.Context, queryVector []byte, limit int) ([]Shard, error) {
 	const query = `
-		SELECT id, category, content, vector, metadata
+		SELECT id, category, content, vector::text, metadata
 		FROM shards
 		WHERE vector IS NOT NULL
 		ORDER BY vector <=> $1
@@ -69,9 +72,12 @@ func (v *PostgresVessel) FindResonant(ctx context.Context, queryVector []byte, l
 	var shards []Shard
 	for rows.Next() {
 		var s Shard
-		var vecStr *string // Use pointer to handle NULLs from DB
+		var vecStr *string 
 		if err := rows.Scan(&s.ID, &s.Category, &s.Content, &vecStr, &s.Metadata); err != nil {
 			return nil, err
+		}
+		if vecStr != nil {
+			s.Vector = parseVector(*vecStr)
 		}
 		shards = append(shards, s)
 	}
@@ -80,7 +86,7 @@ func (v *PostgresVessel) FindResonant(ctx context.Context, queryVector []byte, l
 
 func (v *PostgresVessel) FindText(ctx context.Context, query string, limit int) ([]Shard, error) {
 	const sql = `
-		SELECT id, category, content, vector, metadata
+		SELECT id, category, content, vector::text, metadata
 		FROM shards
 		WHERE content ILIKE $1
 		ORDER BY last_used DESC
@@ -95,9 +101,12 @@ func (v *PostgresVessel) FindText(ctx context.Context, query string, limit int) 
 	var shards []Shard
 	for rows.Next() {
 		var s Shard
-		var vecStr *string // Use pointer to handle NULLs from DB
+		var vecStr *string
 		if err := rows.Scan(&s.ID, &s.Category, &s.Content, &vecStr, &s.Metadata); err != nil {
 			return nil, err
+		}
+		if vecStr != nil {
+			s.Vector = parseVector(*vecStr)
 		}
 		shards = append(shards, s)
 	}
@@ -147,7 +156,7 @@ func (v *PostgresVessel) ArchiveShard(ctx context.Context, id string) error {
 }
 
 func (v *PostgresVessel) GetAllShards(ctx context.Context) ([]Shard, error) {
-	const query = `SELECT id, category, content, vector, metadata FROM shards`
+	const query = `SELECT id, category, content, vector::text, metadata, last_used, created_at FROM shards`
 	rows, err := v.pool.Query(ctx, query)
 	if err != nil {
 		return nil, err
@@ -157,9 +166,12 @@ func (v *PostgresVessel) GetAllShards(ctx context.Context) ([]Shard, error) {
 	var shards []Shard
 	for rows.Next() {
 		var s Shard
-		var vecStr *string // Use pointer to handle NULLs from DB
-		if err := rows.Scan(&s.ID, &s.Category, &s.Content, &vecStr, &s.Metadata); err != nil {
+		var vecStr *string 
+		if err := rows.Scan(&s.ID, &s.Category, &s.Content, &vecStr, &s.Metadata, &s.LastUsed, &s.CreatedAt); err != nil {
 			return nil, err
+		}
+		if vecStr != nil {
+			s.Vector = parseVector(*vecStr)
 		}
 		shards = append(shards, s)
 	}
@@ -200,6 +212,35 @@ func (v *PostgresVessel) GetEvictionCandidates(ctx context.Context, limit int) (
 	return ids, rows.Err()
 }
 
+func (v *PostgresVessel) SaveBond(ctx context.Context, b ShardBond) error {
+	const query = `
+		INSERT INTO shard_bonds (from_id, to_id, weight)
+		VALUES ($1, $2, $3)
+		ON CONFLICT(from_id, to_id) DO UPDATE SET weight = EXCLUDED.weight;
+	`
+	_, err := v.pool.Exec(ctx, query, b.FromID, b.ToID, b.Weight)
+	return err
+}
+
+func (v *PostgresVessel) GetAllBonds(ctx context.Context) ([]ShardBond, error) {
+	const query = `SELECT from_id, to_id, weight FROM shard_bonds`
+	rows, err := v.pool.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var bonds []ShardBond
+	for rows.Next() {
+		var b ShardBond
+		if err := rows.Scan(&b.FromID, &b.ToID, &b.Weight); err != nil {
+			return nil, err
+		}
+		bonds = append(bonds, b)
+	}
+	return bonds, rows.Err()
+}
+
 func formatVector(v []byte) *string {
 	if len(v) == 0 {
 		return nil
@@ -210,8 +251,20 @@ func formatVector(v []byte) *string {
 	}
 	var s []string
 	for _, f := range floats {
-		s = append(s, fmt.Sprintf("%f", f))
+		s = append(s, strconv.FormatFloat(float64(f), 'g', -1, 32))
 	}
 	res := "[" + strings.Join(s, ",") + "]"
 	return &res
+}
+
+// parseVector converts a pgvector string "[0.1, 0.2, ...]" back to []byte (float32s)
+func parseVector(s string) []byte {
+	s = strings.Trim(s, "[]")
+	parts := strings.Split(s, ",")
+	b := make([]byte, len(parts)*4)
+	for i, p := range parts {
+		f, _ := strconv.ParseFloat(strings.TrimSpace(p), 32)
+		binary.LittleEndian.PutUint32(b[i*4:], math.Float32bits(float32(f)))
+	}
+	return b
 }

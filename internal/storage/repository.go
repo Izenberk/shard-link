@@ -8,10 +8,15 @@ type Repository interface {
 	SaveShard(ctx context.Context, s Shard) error
 	FindResonant(ctx context.Context, queryVector []byte, limit int) ([]Shard, error)
 	FindText(ctx context.Context, query string, limit int) ([]Shard, error)
-	GetAllShards(ctx context.Context) ([]Shard, error) // Added for migrations
+	GetAllShards(ctx context.Context) ([]Shard, error)
 	GetCoreShards(ctx context.Context) ([]Shard, error)
 	ArchiveShard(ctx context.Context, id string) error
 	GetCount(ctx context.Context) (int, error)
 	GetEvictionCandidates(ctx context.Context, limit int) ([]string, error)
+	
+	// Bonds & Relationships
+	SaveBond(ctx context.Context, b ShardBond) error
+	GetAllBonds(ctx context.Context) ([]ShardBond, error)
+
 	Close() error
 }

@@ -23,27 +23,33 @@ func main() {
 	var v storage.Repository
 	var err error
 
-	connStr := os.Getenv("DATABASE_URL")
-
-	if connStr != "" {
+	neoURL := os.Getenv("NEO4J_URL")
+	if neoURL != "" {
+		// Knowledge Mesh Mode
+		user := os.Getenv("NEO4J_USER")
+		pass := os.Getenv("NEO4J_PASS")
+		v, err = storage.NewVesselGraph(neoURL, user, pass, "neo4j")
+		if err == nil {
+			log.Println("SHARD-LINK: Knowledge Mesh Ignited (Neo4j Graph)")
+		}
+	} else if connStr := os.Getenv("DATABASE_URL"); connStr != "" {
+		// Legacy High Performance Mode
 		v, err = storage.NewPostgresVessel(context.Background(), connStr)
 		if err == nil {
-			log.Println("SHARD-LINK: PostgreSQL Vessel Ignited (High Performance)")
+			log.Println("SHARD-LINK: PostgreSQK Vessel Ignited (Lagacy storage)")
 		}
 	} else {
-		// Local-First SQLite mode
+		// Local-First Mode
 		dbPath := os.Getenv("DATABASE_PATH")
-		if dbPath == "" {
-			dbPath = "data/shard-link.db"
-		}
+		if dbPath == "" { dbPath = "data/shard-liink.db" }
 		v, err = storage.NewVessel(dbPath)
 		if err == nil {
-			log.Println("SHARD-LINK: SQLite Vessel Ignited (Single-User Mode)")
+			log.Println("SHARD-LINK: SQLite Vessel Ignited")
 		}
 	}
 
 	if err != nil {
-		log.Fatalf("Vessel failed to ignite: %v", err)
+		log.Fatalf("Vessel failed to ignit: %v", err)
 	}
 	defer v.Close()
 
