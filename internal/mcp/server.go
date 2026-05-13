@@ -86,6 +86,39 @@ func (s *MCPServer) RegisterTools() {
 		mcp.WithString("vector", mcp.Description("Base64 encoded float32 vector"), mcp.Required()),
 	)
 	s.mcp.AddTool(saveTool, s.handleSave)
+
+	// Tool 4: search_graph
+	graphTool := mcp.NewTool("search_graph",
+		mcp.WithDescription("Search the Knowledge Mesh by finding a central context and traversing its semantic neighbors (Multi-Hop)"),
+		mcp.WithString("query_vector", mcp.Description("Base64 encoded float32 vector"), mcp.Required()),
+		mcp.WithNumber("limit", mcp.Description("Max neighbors to return")),
+	)
+	s.mcp.AddTool(graphTool, s.handleSearchGraph)
+}
+
+func (s *MCPServer) handleSearchGraph(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	vecStr := request.GetString("query_vector", "")
+	limit := int(request.GetFloat("limit", 10))
+
+	queryVec, err := base64.StdEncoding.DecodeString(vecStr)
+	if err != nil {
+		return mcp.NewToolResultError("Invalid vector encoding"), nil
+	}
+
+	results, err := s.vessel.SearchGraph(ctx, queryVec, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	var response string
+	if len(results) == 0 {
+		response = "No connected neighbors found for this context."
+	} else {
+		for _, shard := range results {
+			response += fmt.Sprintf("[%s]: %s\n---\n", shard.ID, shard.Content)
+		}
+	}
+	return mcp.NewToolResultText(response), nil
 }
 
 

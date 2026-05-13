@@ -241,6 +241,28 @@ func (v *PostgresVessel) GetAllBonds(ctx context.Context) ([]ShardBond, error) {
 	return bonds, rows.Err()
 }
 
+func (v *PostgresVessel) SearchGraph(ctx context.Context, queryVector []byte, limit int) ([]Shard, error) {
+	// Postgres fallback to vector search
+	return v.FindResonant(ctx, queryVector, limit)
+}
+
+func (v *PostgresVessel) GetGraphData(ctx context.Context) ([]Shard, []ShardBond, error) {
+	shards, err := v.GetAllShards(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	bonds, err := v.GetAllBonds(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return shards, bonds, nil
+}
+
+func (v *PostgresVessel) CalculateCommunities(ctx context.Context) (int, error) {
+	// Postgres fallback (no native Louvain)
+	return 0, nil
+}
+
 func formatVector(v []byte) *string {
 	if len(v) == 0 {
 		return nil

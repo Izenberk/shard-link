@@ -184,19 +184,77 @@ func (v *VesselGraph) GetEvictionCandidates(ctx context.Context, limit int) ([]s
 
 // Helpers
 
+func (v *VesselGraph) CalculateCommunities(ctx context.Context) (int, error) {
+	const cleanupQuery = `CALL gds.graph.drop('communityGraph', false)`
+	const projectQuery = `
+	CALL gds.graph.project('communityGraph', 'Shard', 'CONNECTED_TO', {
+		relationshipProperties: 'weight'
+	}) YIELD graphName
+	`
+	const louvainQuery = `
+	CALL gds.louvain.write('communityGraph', {
+		writeProperty: 'community'
+	}) YIELD communityCount
+	RETURN communityCount
+	`
+	const pageRankQuery = `
+	CALL gds.pageRank.write('communityGraph', {
+		writeProperty: 'pagerank'
+	}) YIELD computeMillis
+	RETURN computeMillis
+	`
+	const dropQuery = `CALL gds.graph.drop('communityGraph', false)`
+
+	session := v.driver.NewSession(ctx, neo4j.SessionConfig{DatabaseName: v.dbName})
+	defer session.Close(ctx)
+
+	var count int
+	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		_, _ = tx.Run(ctx, cleanupQuery, nil) // Ensure clean state
+		_, err := tx.Run(ctx, projectQuery, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		res, err := tx.Run(ctx, louvainQuery, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		if res.Next(ctx) {
+			val, _ := res.Record().Get("communityCount")
+			count = int(val.(int64))
+		}
+
+		// Calculate PageRank as well
+		_, err = tx.Run(ctx, pageRankQuery, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		_, _ = tx.Run(ctx, dropQuery, nil)
+		return nil, nil
+	})
+
+	return count, err
+}
+
 func nodeToShard(node neo4j.Node) Shard {
 	props := node.GetProperties()
-	
+
 	id, _ := props["id"].(string)
 	cat, _ := props["category"].(string)
 	cont, _ := props["content"].(string)
 	meta, _ := props["metadata"].(string)
-	
+
 	luStr, _ := props["last_used"].(string)
 	caStr, _ := props["created_at"].(string)
-	
+
 	lu, _ := time.Parse(time.RFC3339, luStr)
 	ca, _ := time.Parse(time.RFC3339, caStr)
+
+	// Extract Community ID
+	commID, _ := props["community"].(int64)
 
 	// Convert []float32 (Neo4j) back to []byte (Shard-Link)
 	var vec []byte
@@ -209,13 +267,14 @@ func nodeToShard(node neo4j.Node) Shard {
 	}
 
 	return Shard{
-		ID:        id,
-		Category:  cat,
-		Content:   cont,
-		Metadata:  []byte(meta),
-		Vector:    vec,
-		LastUsed:  lu,
-		CreatedAt: ca,
+		ID:          id,
+		Category:    cat,
+		Content:     cont,
+		Metadata:    []byte(meta),
+		Vector:      vec,
+		CommunityID: commID,
+		LastUsed:    lu,
+		CreatedAt:   ca,
 	}
 }
 
@@ -341,4 +400,86 @@ func (v *VesselGraph) GetCoreShards(ctx context.Context) ([]Shard, error) {
 		shards = append(shards, nodeToShard(node.(neo4j.Node)))
 	}
 	return shards, nil
+}
+
+func (v *VesselGraph) SearchGraph(ctx context.Context, queryVector []byte, limit int) ([]Shard, error) {
+	// Find the closest shard, then get its neighbors (Multi-Hop)
+	query := `
+	CALL db.index.vector.queryNodes('shard_embeddings', 1, $vector)
+	YIELD node AS center, score
+	MATCH (center)-[:CONNECTED_TO]-(neighbor:Shard)
+	RETURN neighbor
+	LIMIT $limit
+	`
+	params := map[string]any{
+		"vector": decodeVector(queryVector),
+		"limit":  limit,
+	}
+
+	result, err := neo4j.ExecuteQuery(ctx, v.driver, query, params, neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithDatabase(v.dbName))
+	if err != nil {
+		return nil, err
+	}
+
+	var shards []Shard
+	for _, record := range result.Records {
+		node, _ := record.Get("neighbor")
+		shards = append(shards, nodeToShard(node.(neo4j.Node)))
+	}
+	return shards, nil
+}
+
+func (v *VesselGraph) GetGraphData(ctx context.Context) ([]Shard, []ShardBond, error) {
+	shards, err := v.GetAllShards(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	bonds, err := v.GetAllBonds(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return shards, bonds, nil
+}
+
+func (v *VesselGraph) FindInvalidShards(ctx context.Context) ([]string, error) {
+	query := `
+	MATCH (s:Shard)
+	WHERE s.embedding IS NULL OR size(s.embedding) = 0
+	RETURN s.id AS id
+	`
+
+	result, err := neo4j.ExecuteQuery(ctx, v.driver, query, nil, neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithDatabase(v.dbName))
+	if err != nil {
+		return nil, err
+	}
+
+	var ids []string
+	for _, record := range result.Records {
+		id, _ := record.Get("id")
+		ids = append(ids, id.(string))
+	}
+	return ids, nil
+}
+
+func (v *VesselGraph) FindOrphanShards(ctx context.Context) ([]string, error) {
+	query := `
+	MATCH (s:Shard)
+	WHERE s.category <> 'core'
+		AND NOT (s)-[:CONNECTED_TO]-()
+	RETURN s.id AS id
+	`
+	result, err := neo4j.ExecuteQuery(ctx, v.driver, query, nil, neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithDatabase(v.dbName))
+	if err != nil {
+		return nil, err
+	}
+
+	var ids []string
+	for _, record := range result.Records {
+		id, _ := record.Get("id")
+		ids = append(ids, id.(string))
+	}
+	return ids, nil
 }

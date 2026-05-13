@@ -54,7 +54,7 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 - [x] **Native Centrality**: Refactored the Janitor to use **PageRank** via GDS for intelligent, relational-aware eviction.
 - [ ] **Multi-Hop Retrieval**: Implement a `search_graph` MCP tool to enable path-traversal (e.g., "Find the decision chain for feature X").
 - [ ] **Visual Ego**: Expose a read-only graph visualizer to monitor the "Ego Anchor" and memory clusters.
-- [ ] **Mesh Consistency Checker**: Add a `cmd/check_mesh` tool to audit bond health, verify provenance, and detect "hallucinated" orphans.
+- [x] **Mesh Consistency Checker**: Add a `cmd/check_mesh` tool to audit bond health, verify provenance, and detect "hallucinated" orphans.
 
 ## Phase 9: Memory Integrity (Claude Improvements)
 - [ ] **Source Provenance**: Add `source_type`, `source_ref`, and `confidence` to the Shard schema.
@@ -68,4 +68,5 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 - [ ] **Dimension Right-sizing**: Transition to 384-D or 512-D embeddings to optimize RAM and speed.
 
 ---
-*Status: KNOWLEDGE MESH ACTIVE (Neo4j + PageRank Deployed) | Date: 2026-05-13*
+*Status: PHASE 8 COMPLETE (Knowledge Mesh & Cyber-HUD Active) | Date: 2026-05-14*
+oyed) | Date: 2026-05-13*

@@ -328,6 +328,29 @@ func (v *Vessel) GetAllBonds(ctx context.Context) ([]ShardBond, error) {
 	return bonds, stmt.Err()
 }
 
+func (v *Vessel) SearchGraph(ctx context.Context, queryVector []byte, limit int) ([]Shard, error) {
+	// SQLite doesn't support complex graph traversal easily, so we fallback to vector search
+	return v.FindResonant(ctx, queryVector, limit)
+}
+
+func (v *Vessel) GetGraphData(ctx context.Context) ([]Shard, []ShardBond, error) {
+	shards, err := v.GetAllShards(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	bonds, err := v.GetAllBonds(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return shards, bonds, nil
+}
+
+func (v *Vessel) CalculateCommunities(ctx context.Context) (int, error) {
+	// SQLite doesn't support Louvain/Leiden natively.
+	// For now, we return 0 communities.
+	return 0, nil
+}
+
 func (v *Vessel) Close() error {
 	return v.conn.Close()
 }
