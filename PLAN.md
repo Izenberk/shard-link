@@ -47,16 +47,25 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 - [x] Update the `Vessel` to support **Multi-Tenant** shard ownership (UserID field).
 
 ## Phase 8: The Knowledge Mesh (GraphDB Integration)
-- [ ] **Infrastructure Swap**: Add Neo4j/Memgraph to `docker-compose.yml` with APOC/GDS support.
-- [ ] **Graph Repository**: Implement a `GraphRepository` in Go to map Shards to Nodes and Bonds to Typed Edges (`REFINES`, `DEPENDS_ON`, `CONTEXT_OF`).
-- [ ] **Native Centrality**: Refactor the Janitor to use Cypher-based Centrality (Node Degree) for the Composite Survival Score.
+- [x] **Infrastructure Swap**: Added Neo4j to `docker-compose.yml` with APOC and Graph Data Science (GDS) support.
+- [x] **Graph Repository**: Implemented `VesselGraph` in Go, mapping Shards to Nodes and Bonds to `CONNECTED_TO` edges.
+- [x] **Data Integrity & Sync**: Developed `cmd/repair_vec` to fix zeroed vectors and `cmd/migrate` for high-fidelity transfer to the Mesh.
+- [x] **Auto-Linker**: Implemented `cmd/auto_link` to automatically establish semantic bonds using `gds.similarity.cosine`.
+- [x] **Native Centrality**: Refactored the Janitor to use **PageRank** via GDS for intelligent, relational-aware eviction.
 - [ ] **Multi-Hop Retrieval**: Implement a `search_graph` MCP tool to enable path-traversal (e.g., "Find the decision chain for feature X").
 - [ ] **Visual Ego**: Expose a read-only graph visualizer to monitor the "Ego Anchor" and memory clusters.
+- [ ] **Mesh Consistency Checker**: Add a `cmd/check_mesh` tool to audit bond health, verify provenance, and detect "hallucinated" orphans.
 
-## Phase 9: Standalone Intelligence (Local Inference)
+## Phase 9: Memory Integrity (Claude Improvements)
+- [ ] **Source Provenance**: Add `source_type`, `source_ref`, and `confidence` to the Shard schema.
+- [ ] **Hybrid Retrieval**: Implement Reciprocal Rank Fusion (RRF) combining Vector search with BM25/Lexical search.
+- [ ] **MMR Retrieval**: Implement Maximal Marginal Relevance to ensure diversity in retrieved context.
+- [ ] **Storage Hygiene**: Implement HNSW tuning, partial indexes, and automated VACUUM/REINDEX crons.
+
+## Phase 10: Standalone Intelligence (Local Inference)
 - [ ] Integrate a **Local Embedding Tool** (e.g., Ollama or a Go-native wrapper).
 - [ ] Implement an `Embedder` interface to swap between local and cloud providers.
-- [ ] Auto-generate embeddings during `save_memory` without external dependencies.
+- [ ] **Dimension Right-sizing**: Transition to 384-D or 512-D embeddings to optimize RAM and speed.
 
 ---
-*Status: MISSION COMPLETE (Postgres Scaling Deployed) | Date: 2026-05-11*
+*Status: KNOWLEDGE MESH ACTIVE (Neo4j + PageRank Deployed) | Date: 2026-05-13*

@@ -103,9 +103,61 @@ func (v *VesselGraph) FindResonant(ctx context.Context, queryVector []byte, limi
 	return shards, nil
 }
 
-// GetEvictionCandidates identifies "Orphan" shards (low centrality/links)
+// GetEvictionCandidates identifies "Orphan" shards (low centrality/links) using PageRank
 func (v *VesselGraph) GetEvictionCandidates(ctx context.Context, limit int) ([]string, error) {
-	query := `
+	// 1. Try PageRank via GDS
+	const projectionQuery = `
+	CALL gds.graph.project('janitorGraph', 'Shard', 'CONNECTED_TO', {
+		relationshipProperties: 'weight'
+	}) YIELD graphName
+	`
+	const pageRankQuery = `
+	CALL gds.pageRank.stream('janitorGraph', {
+		relationshipWeightProperty: 'weight'
+	})
+	YIELD nodeId, score
+	WITH gds.util.asNode(nodeId) AS s, score
+	WHERE s.category <> 'core'
+	RETURN s.id
+	ORDER BY score ASC, s.last_used ASC
+	LIMIT $limit
+	`
+	const dropQuery = `CALL gds.graph.drop('janitorGraph', false) YIELD graphName`
+
+	// We use a transaction to ensure cleanup
+	session := v.driver.NewSession(ctx, neo4j.SessionConfig{DatabaseName: v.dbName})
+	defer session.Close(ctx)
+
+	var ids []string
+	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		// Create projection
+		_, err := tx.Run(ctx, projectionQuery, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		// Run PageRank
+		res, err := tx.Run(ctx, pageRankQuery, map[string]any{"limit": limit})
+		if err != nil {
+			return nil, err
+		}
+
+		for res.Next(ctx) {
+			id, _ := res.Record().Get("s.id")
+			ids = append(ids, id.(string))
+		}
+
+		// Drop projection
+		_, _ = tx.Run(ctx, dropQuery, nil)
+		return nil, nil
+	})
+
+	if err == nil && len(ids) > 0 {
+		return ids, nil
+	}
+
+	// 2. Fallback to Degree Centrality if GDS fails or no links exist
+	fallbackQuery := `
 	MATCH (s:Shard)
 	WHERE s.category <> 'core'
 	OPTIONAL MATCH (s)-[r]-()
@@ -114,16 +166,15 @@ func (v *VesselGraph) GetEvictionCandidates(ctx context.Context, limit int) ([]s
 	LIMIT $limit
 	RETURN s.id
 	`
-
 	params := map[string]any{"limit": limit}
 
-	result, err := neo4j.ExecuteQuery(ctx, v.driver, query, params, neo4j.EagerResultTransformer,
+	result, err := neo4j.ExecuteQuery(ctx, v.driver, fallbackQuery, params, neo4j.EagerResultTransformer,
 		neo4j.ExecuteQueryWithDatabase(v.dbName))
 	if err != nil {
 		return nil, err
 	}
 
-	var ids []string
+	ids = nil
 	for _, record := range result.Records {
 		id, _ := record.Get("s.id")
 		ids = append(ids, id.(string))
