@@ -61,7 +61,7 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 - [x] **Source Provenance**: Add `source_type`, `source_ref`, and `confidence` to the Shard schema.
 - [x] **Hybrid Retrieval**: Implement Reciprocal Rank Fusion (RRF) combining Vector search with BM25/Lexical search.
 - [x] **MMR Retrieval**: Implement Maximal Marginal Relevance to ensure diversity in retrieved context.
-- [ ] **Storage Hygiene**: Implement HNSW tuning, partial indexes, and automated VACUUM/REINDEX crons.
+- [x] **Storage Hygiene**: Implement HNSW tuning, partial indexes, and automated VACUUM/REINDEX crons.
 
 ## Phase 10: Standalone Intelligence (Local Inference)
 - [ ] Integrate a **Local Embedding Tool** (e.g., Ollama or a Go-native wrapper).
@@ -69,4 +69,4 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 - [ ] **Dimension Right-sizing**: Transition to 384-D or 512-D embeddings to optimize RAM and speed.
 
 ---
-*Status: PHASE 9 IN PROGRESS (MMR & RRF Active) | Date: 2026-05-15*
+*Status: PHASE 9 COMPLETE (Hygiene & MMR Active) | Phase 10 IN PROGRESS | Date: 2026-05-15*

@@ -60,4 +60,9 @@ func (j *Janitor) performCleanup(ctx context.Context) {
 	for _, id := range candidates {
 		_ = j.vessel.ArchiveShard(ctx, id)
 	}
+
+	if len(candidates) > 0 {
+		// Run Storage Hygiene / Optimization after evictions
+		_ = j.vessel.Optimize(ctx)
+	}
 }

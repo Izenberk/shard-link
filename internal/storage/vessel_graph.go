@@ -514,3 +514,10 @@ func (v *VesselGraph) FindOrphanShards(ctx context.Context) ([]string, error) {
 	}
 	return ids, nil
 }
+
+// Optimize performs Neo4j maintenance (mostly a no-op as Neo4j handles it)
+func (v *VesselGraph) Optimize(ctx context.Context) error {
+	// Neo4j handles space reclamation internally.
+	// Our Vector index is ensured on startup, but we can call it here just to be safe.
+	return v.ensureIndexes(ctx)
+}

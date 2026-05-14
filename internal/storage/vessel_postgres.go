@@ -283,6 +283,24 @@ func (v *PostgresVessel) CalculateCommunities(ctx context.Context) (int, error) 
 	return 0, nil
 }
 
+// Optimize runs Postgres-specific maintenance routines
+func (v *PostgresVessel) Optimize(ctx context.Context) error {
+	// 1. Partial Index for Core Shards
+	_, _ = v.pool.Exec(ctx, "CREATE INDEX IF NOT EXISTS idx_shards_category_core ON shards(category) WHERE category = 'core';")
+	
+	// 2. HNSW Tuning for pgvector. We assume the extension is enabled and vector column exists.
+	// m=16, ef_construction=64 are good baseline parameters for 1536-D vectors.
+	_, _ = v.pool.Exec(ctx, "CREATE INDEX IF NOT EXISTS idx_shards_vector ON shards USING hnsw (vector vector_cosine_ops) WITH (m = 16, ef_construction = 64);")
+
+	// 3. VACUUM ANALYZE to reclaim dead tuples and update statistics for the query planner.
+	// Note: VACUUM cannot run inside a transaction block, so we execute it directly on the pool.
+	_, err := v.pool.Exec(ctx, "VACUUM ANALYZE shards;")
+	if err != nil {
+		return fmt.Errorf("postgres vacuum failed: %w", err)
+	}
+	return nil
+}
+
 func formatVector(v []byte) *string {
 	if len(v) == 0 {
 		return nil

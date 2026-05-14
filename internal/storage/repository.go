@@ -24,5 +24,8 @@ type Repository interface {
 	GetGraphData(ctx context.Context) ([]Shard, []ShardBond, error)
 	CalculateCommunities(ctx context.Context) (int, error)
 
+	// Storage Hygiene
+	Optimize(ctx context.Context) error
+
 	Close() error
 }

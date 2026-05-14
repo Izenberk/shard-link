@@ -42,3 +42,4 @@ CREATE TABLE IF NOT EXISTS shard_bonds (
 );
 
 CREATE INDEX IF NOT EXISTS idx_shards_janitor ON shards(category, last_used);
+CREATE INDEX IF NOT EXISTS idx_shards_category_core ON shards(category) WHERE category = 'core';

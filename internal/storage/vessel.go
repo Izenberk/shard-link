@@ -373,6 +373,23 @@ func (v *Vessel) CalculateCommunities(ctx context.Context) (int, error) {
 	return 0, nil
 }
 
+// Optimize runs maintenance tasks to reclaim space and update statistics
+func (v *Vessel) Optimize(ctx context.Context) error {
+	// PRAGMA optimize runs query planner analytics
+	err := v.conn.Exec("PRAGMA optimize;")
+	if err != nil {
+		return fmt.Errorf("pragma optimize failed: %w", err)
+	}
+
+	// VACUUM reclaims deleted space (useful after Janitor eviction)
+	err = v.conn.Exec("VACUUM;")
+	if err != nil {
+		return fmt.Errorf("vacuum failed: %w", err)
+	}
+
+	return nil
+}
+
 func (v *Vessel) Close() error {
 	return v.conn.Close()
 }
