@@ -5,6 +5,12 @@ CREATE TABLE IF NOT EXISTS shards (
     content     TEXT NOT NULL,
     vector      BLOB NOT NULL,      -- 1536-D float32 vector (6144 bytes)
     metadata    BLOB,               -- SQLite JSONB
+    
+    -- Phase 9: Source Provenance
+    source_type TEXT,               -- 'manual', 'github', 'chat', 'web_scrape'
+    source_ref  TEXT,               -- URI, File Path, or ID
+    confidence  REAL DEFAULT 1.0,   -- 0.0 - 1.0 Reliability Score
+
     last_used   DATETIME DEFAULT CURRENT_TIMESTAMP,
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -16,6 +22,12 @@ CREATE TABLE IF NOT EXISTS shards_archive (
     content     TEXT NOT NULL,
     vector      BLOB NOT NULL,
     metadata    BLOB,
+
+    -- Phase 9: Source Provenance
+    source_type TEXT,
+    source_ref  TEXT,
+    confidence  REAL DEFAULT 1.0,
+
     archived_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

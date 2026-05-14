@@ -50,16 +50,17 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 - [x] **Infrastructure Swap**: Added Neo4j to `docker-compose.yml` with APOC and Graph Data Science (GDS) support.
 - [x] **Graph Repository**: Implemented `VesselGraph` in Go, mapping Shards to Nodes and Bonds to `CONNECTED_TO` edges.
 - [x] **Data Integrity & Sync**: Developed `cmd/repair_vec` to fix zeroed vectors and `cmd/migrate` for high-fidelity transfer to the Mesh.
+
 - [x] **Auto-Linker**: Implemented `cmd/auto_link` to automatically establish semantic bonds using `gds.similarity.cosine`.
 - [x] **Native Centrality**: Refactored the Janitor to use **PageRank** via GDS for intelligent, relational-aware eviction.
-- [ ] **Multi-Hop Retrieval**: Implement a `search_graph` MCP tool to enable path-traversal (e.g., "Find the decision chain for feature X").
-- [ ] **Visual Ego**: Expose a read-only graph visualizer to monitor the "Ego Anchor" and memory clusters.
+- [x] **Multi-Hop Retrieval**: Implement a `search_graph` MCP tool to enable path-traversal (e.g., "Find the decision chain for feature X").
+- [x] **Visual Ego**: Expose a read-only graph visualizer to monitor the "Ego Anchor" and memory clusters.
 - [x] **Mesh Consistency Checker**: Add a `cmd/check_mesh` tool to audit bond health, verify provenance, and detect "hallucinated" orphans.
 
 ## Phase 9: Memory Integrity (Claude Improvements)
-- [ ] **Source Provenance**: Add `source_type`, `source_ref`, and `confidence` to the Shard schema.
-- [ ] **Hybrid Retrieval**: Implement Reciprocal Rank Fusion (RRF) combining Vector search with BM25/Lexical search.
-- [ ] **MMR Retrieval**: Implement Maximal Marginal Relevance to ensure diversity in retrieved context.
+- [x] **Source Provenance**: Add `source_type`, `source_ref`, and `confidence` to the Shard schema.
+- [x] **Hybrid Retrieval**: Implement Reciprocal Rank Fusion (RRF) combining Vector search with BM25/Lexical search.
+- [x] **MMR Retrieval**: Implement Maximal Marginal Relevance to ensure diversity in retrieved context.
 - [ ] **Storage Hygiene**: Implement HNSW tuning, partial indexes, and automated VACUUM/REINDEX crons.
 
 ## Phase 10: Standalone Intelligence (Local Inference)
@@ -68,5 +69,4 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 - [ ] **Dimension Right-sizing**: Transition to 384-D or 512-D embeddings to optimize RAM and speed.
 
 ---
-*Status: PHASE 8 COMPLETE (Knowledge Mesh & Cyber-HUD Active) | Date: 2026-05-14*
-oyed) | Date: 2026-05-13*
+*Status: PHASE 9 IN PROGRESS (MMR & RRF Active) | Date: 2026-05-15*

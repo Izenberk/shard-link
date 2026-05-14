@@ -59,17 +59,23 @@ func (v *VesselGraph) SaveShard(ctx context.Context, s Shard) error {
 			s.content = $content,
 			s.embedding = $embedding,
 			s.metadata = $metadata,
+			s.source_type = $source_type,
+			s.source_ref = $source_ref,
+			s.confidence = $confidence,
 			s.last_used = $last_used,
 			s.created_at = $created_at
 	`
 	params := map[string]any{
-		"id":         s.ID,
-		"category":   s.Category,
-		"content":    s.Content,
-		"embedding":  decodeVector(s.Vector), // Convert []byte to []float32 for Neo4j
-		"metadata":   string(s.Metadata),
-		"last_used":  s.LastUsed.Format(time.RFC3339),
-		"created_at": s.CreatedAt.Format(time.RFC3339),
+		"id":          s.ID,
+		"category":    s.Category,
+		"content":     s.Content,
+		"embedding":   decodeVector(s.Vector), // Convert []byte to []float32 for Neo4j
+		"metadata":    string(s.Metadata),
+		"source_type": s.SourceType,
+		"source_ref":  s.SourceRef,
+		"confidence":  s.Confidence,
+		"last_used":   s.LastUsed.Format(time.RFC3339),
+		"created_at":  s.CreatedAt.Format(time.RFC3339),
 	}
 
 	_, err := neo4j.ExecuteQuery(ctx, v.driver, query, params, neo4j.EagerResultTransformer,
@@ -247,6 +253,11 @@ func nodeToShard(node neo4j.Node) Shard {
 	cont, _ := props["content"].(string)
 	meta, _ := props["metadata"].(string)
 
+	// Phase 9: Source Provenance
+	srcType, _ := props["source_type"].(string)
+	srcRef, _ := props["source_ref"].(string)
+	conf, _ := props["confidence"].(float64)
+
 	luStr, _ := props["last_used"].(string)
 	caStr, _ := props["created_at"].(string)
 
@@ -272,6 +283,9 @@ func nodeToShard(node neo4j.Node) Shard {
 		Content:     cont,
 		Metadata:    []byte(meta),
 		Vector:      vec,
+		SourceType:  srcType,
+		SourceRef:   srcRef,
+		Confidence:  conf,
 		CommunityID: commID,
 		LastUsed:    lu,
 		CreatedAt:   ca,
@@ -384,6 +398,23 @@ func (v *VesselGraph) FindText(ctx context.Context, query string, limit int) ([]
 		shards = append(shards, nodeToShard(node.(neo4j.Node)))
 	}
 	return shards, nil
+}
+
+// FindHybrid performs Reciprocal Rank Fusion (RRF) on vector and text search results.
+func (v *VesselGraph) FindHybrid(ctx context.Context, textQuery string, queryVector []byte, limit int) ([]Shard, error) {
+	candidateLimit := limit * 2
+
+	vectorResults, err := v.FindResonant(ctx, queryVector, candidateLimit)
+	if err != nil {
+		return nil, fmt.Errorf("vector search failed in hybrid: %w", err)
+	}
+
+	textResults, err := v.FindText(ctx, textQuery, candidateLimit)
+	if err != nil {
+		return nil, fmt.Errorf("text search failed in hybrid: %w", err)
+	}
+
+	return ReciprocalRankFusion(limit, 60.0, vectorResults, textResults), nil
 }
 
 func (v *VesselGraph) GetCoreShards(ctx context.Context) ([]Shard, error) {

@@ -181,6 +181,28 @@ func (v *Vessel) FindText(ctx context.Context, query string, limit int) ([]Shard
 	return shards, nil
 }
 
+// FindHybrid performs Reciprocal Rank Fusion (RRF) on vector and text search results.
+func (v *Vessel) FindHybrid(ctx context.Context, textQuery string, queryVector []byte, limit int) ([]Shard, error) {
+	// 1. Fetch expanded candidate lists (limit * 2 is a common heuristic for RRF)
+	candidateLimit := limit * 2
+
+	vectorResults, err := v.FindResonant(ctx, queryVector, candidateLimit)
+	if err != nil {
+		return nil, fmt.Errorf("vector search failed in hybrid: %w", err)
+	}
+
+	textResults, err := v.FindText(ctx, textQuery, candidateLimit)
+	if err != nil {
+		return nil, fmt.Errorf("text search failed in hybrid: %w", err)
+	}
+
+	// 2. Fuse the results using our RRF utility
+	// k=60.0 is the standard smoothing constant
+	fusedResults := ReciprocalRankFusion(limit, 60.0, vectorResults, textResults)
+
+	return fusedResults, nil
+}
+
 func (v *Vessel) GetCoreShards(ctx context.Context) ([]Shard, error) {
 	const query = `SELECT id, content FROM shards WHERE category = 'core'`
 	stmt, _, err := v.conn.Prepare(query)

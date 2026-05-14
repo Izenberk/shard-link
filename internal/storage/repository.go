@@ -8,6 +8,7 @@ type Repository interface {
 	SaveShard(ctx context.Context, s Shard) error
 	FindResonant(ctx context.Context, queryVector []byte, limit int) ([]Shard, error)
 	FindText(ctx context.Context, query string, limit int) ([]Shard, error)
+	FindHybrid(ctx context.Context, textQuery string, queryVector []byte, limit int) ([]Shard, error)
 	GetAllShards(ctx context.Context) ([]Shard, error)
 	GetCoreShards(ctx context.Context) ([]Shard, error)
 	ArchiveShard(ctx context.Context, id string) error

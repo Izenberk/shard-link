@@ -25,13 +25,13 @@ func TestJanitor_EvictionImmunity(t *testing.T) {
 
 	// Shard 2: Memory (IMMUNE by Bond)
 	v.SaveShard(ctx, storage.Shard{ID: "bonded-1", Category: "memory", Content: "Deep Thought"})
-	v.CreateBond(storage.ShardBond{FromID: "core-1", ToID: "bonded-1", Weight: 0.9})
+	v.SaveBond(ctx, storage.ShardBond{FromID: "core-1", ToID: "bonded-1", Weight: 0.9})
 	t.Log("Injected Bonded Shard (Immune by Weight > 0.85)")
 
 	// Shard 3: Memory (Protected - It's not the "worst" because we'll add a worse one)
 	v.SaveShard(ctx, storage.Shard{ID: "memory-1", Category: "memory", Content: "Active Memory"})
 	// We give it a weak bond (0.5). It is NOT immune, but it is "less orphan" than Shard 4.
-	v.CreateBond(storage.ShardBond{FromID: "core-1", ToID: "memory-1", Weight: 0.5})
+	v.SaveBond(ctx, storage.ShardBond{FromID: "core-1", ToID: "memory-1", Weight: 0.5})
 	t.Log("Injected Weakly-Bonded Shard (Protected from Orphan status)")
 
 	// Shard 4: Orphan (TARGET for Archive - Added to force the overage)
