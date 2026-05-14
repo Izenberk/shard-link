@@ -54,6 +54,8 @@ Add the following to your MCP client configuration (e.g., Gemini CLI, Claude Des
 - **Shard Bonds:** A relational "Knowledge Mesh" where shards are linked by cosine similarity (> 0.85).
 - **Dependency Immunity:** Shards strongly bonded to active context are protected from archival.
 - **The Vessel:** A high-performance PostgreSQL repository using pgvector for 1536-D math.
+- **Source Provenance:** Shards maintain their origin (`source_type`, `source_ref`, `confidence`).
+- **Hybrid Retrieval (RRF & MMR):** Searches combine BM25 text match with vector similarity, using Reciprocal Rank Fusion and Maximal Marginal Relevance for context diversity.
 
 ## 5. The Janitor (Size Management)
 The Janitor maintains memory density by "fading" shards to the Basement using a **Composite Survival Score**.
@@ -65,6 +67,7 @@ Instead of rigid recency filtering, Shard-Link uses a weighted importance score:
 1. **Category:** If `category == 'core'`, skip.
 2. **Immunity:** If shard is strongly bonded (weight > 0.85), skip.
 3. **Resonance Decay:** Shards with low survival scores are archived first, protecting foundational anchors even if they are old.
+4. **Storage Hygiene:** The Janitor automatically runs DB-specific tuning (VACUUM ANALYZE, HNSW tuning, PRAGMA optimize) after evictions.
 
 ## 6. Development Philosophy
 - **Active Learning:** Scaffolding provided by Gemini; core logic implemented by Izenberk.
@@ -84,9 +87,4 @@ Shard-Link implements **Defense in Depth** to ensure security without requiring 
 - **[Core Context (GEMINI.md)](./GEMINI.md):** Foundational mandates and domain logic for AI agents.
 
 ---
-*Status: PHASE 8 COMPLETE (Knowledge Mesh Active) | Date: 2026-05-14*
-2026-05-11*
-nts.
-
----
-*Status: MISSION COMPLETE (Postgres Scaling Deployed) | Date: 2026-05-11*
+*Status: PHASE 9 COMPLETE (Memory Integrity Active) | Date: 2026-05-15*
