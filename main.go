@@ -66,10 +66,15 @@ func main() {
 	switch mode {
 	case "server":
 		// Cloud Mode: Zero local hardware load, utilizes Gemini API
+		geminiKey := os.Getenv("GEMINI_API_KEY")
+		if geminiKey == "" {
+			log.Fatal("EMBEDDING_MODE='server' but GEMINI_API_KEY is not set.")
+		}
+
 		model := os.Getenv("EMBEDDING_MODEL")
 		if model == "" { model = "text-embedding-004" }
 		
-		geminiEmb, err := storage.NewGeminiEmbedder(ctx, apiKey, model)
+		geminiEmb, err := storage.NewGeminiEmbedder(ctx, geminiKey, model)
 		if err != nil {
 			log.Fatalf("Failed to ignite Cloud Embedder: %v", err)
 		}
