@@ -29,6 +29,7 @@ postgres_data/
 # Environment
 .env
 .env.*
+!.env.example
 certs/
 
 # OS files

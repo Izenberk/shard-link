@@ -18,6 +18,8 @@ services:
       - NEO4J_PASS=shardpass
       - PUBLIC_URL=https://hub.izenberk.com
       - HUB_API_KEY=${HUB_API_KEY}
+      - EMBEDDING_MODE=${EMBEDDING_MODE:-none}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-004}
     ports:
       - "8080:8080"
     restart: unless-stopped
