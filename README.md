@@ -43,7 +43,7 @@ The Hub will be available at `:8080/sse`, and your **Live Knowledge Mesh** is vi
 - **Autonomous Memory (Phase 11):** The system proactively links resonant shards on-save and via background synthesis.
 - **Shard Bonds:** Relationships established when cosine similarity exceeds `MESH_LINK_THRESHOLD` (default 0.70).
 - **Core Resonance Protection:** Shards with high similarity to your core profile are autonomously protected from eviction.
-- **Visual Ego:** A real-time, interactive D3.js dashboard for monitoring memory clusters and multi-hop retrieval.
+- **Visual Ego:** A real-time, interactive D3.js dashboard for monitoring memory clusters, topical neighborhoods, and manual bond management.
 
 
 ## 5. The Janitor (Size Management)
@@ -76,4 +76,4 @@ Shard-Link implements **Defense in Depth** to ensure security without requiring 
 - **[Core Context (GEMINI.md)](./GEMINI.md):** Foundational mandates and domain logic for AI agents.
 
 ---
-*Status: PHASE 10 COMPLETE (Standalone Intelligence Active) | Date: 2026-05-16*
+*Status: PHASE 11 COMPLETE (Autonomous Memory Active) | Date: 2026-05-16*

@@ -104,14 +104,23 @@ func main() {
 			http.Error(w, "from and to IDs required", 400)
 			return
 		}
-		// We need an ArchiveBond or DeleteBond method in Repository
-		// For now, let's use a Cypher query directly if it's VesselGraph
-		query := "MATCH (f:Shard {id: $from})-[r:CONNECTED_TO]-(t:Shard {id: $to}) DELETE r"
-		_, err := s.vessel.ExecuteQuery(ctx, query, map[string]any{"from": from, "to": to})
+		log.Printf("[API] Manual Unlink Request: %s <-/-> %s", from, to)
+		
+		// Use bidirectional match to ensure we catch the bond regardless of direction
+		query := `
+		MATCH (f:Shard {id: $from})-[r:CONNECTED_TO]-(t:Shard {id: $to}) 
+		DELETE r
+		RETURN count(r) as deleted
+		`
+		result, err := s.vessel.ExecuteQuery(ctx, query, map[string]any{"from": from, "to": to})
 		if err != nil {
+			log.Printf("[API ERROR] Failed to delete bond: %v", err)
 			http.Error(w, err.Error(), 500)
 			return
 		}
+		
+		deleted, _ := result.Records[0].Get("deleted")
+		log.Printf("[API] Successfully removed %v semantic bonds.", deleted)
 		w.WriteHeader(http.StatusNoContent)
 
 	default:

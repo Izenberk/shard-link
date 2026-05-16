@@ -30,8 +30,9 @@ body {
 
 .link { 
     stroke: var(--accent); 
-    stroke-opacity: 0.1; 
-    stroke-width: 0.8px;
+    stroke-opacity: 0.3; 
+    stroke-width: 1px;
+    cursor: pointer;
 }
 
 /* Selection HUD Overlay */
