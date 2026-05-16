@@ -66,14 +66,17 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 ## Phase 10: Standalone Intelligence (Local Inference)
 - [x] **Direct Access**: Implemented MCP Prompt for direct slash-command retrieval (`/shard`).
 - [x] **Stability Patch**: Optimized SSE KeepAlive (15s) and Neo4j heap sizing (2GB).
+- [x] **Intelligence Abstraction**: Defined the `Embedder` interface to support multiple providers.
+- [x] **Automatic Generation**: Hub now generates vectors if missing during `save_memory`.
+- [ ] Integrate a **Cloud Embedder** (Gemini API) for hardware-friendly production use.
 - [ ] Integrate a **Local Embedding Tool** (e.g., Ollama or a Go-native wrapper).
-- [ ] Implement an `Embedder` interface to swap between local and cloud providers.
 - [ ] **Dimension Right-sizing**: Transition to 384-D or 512-D embeddings to optimize RAM and speed.
 
 ## Recent Progress (2026-05-16)
-- **MCP Stability Improvements**: Adjusted Janitor frequency to 15m, tuned Neo4j heap/pagecache, and configured SSE KeepAlive to 15s.
+- **Phase 10 Ignition**: Defined `Embedder` interface and implemented `MockEmbedder` for hardware-friendly development.
+- **Hub Intelligence**: Updated `MCPServer` to support optional vectors; the Hub now uses the embedder to generate vectors from text if they aren't provided.
+- **MCP Stability**: Adjusted Janitor frequency to 15m, tuned Neo4j heap/pagecache, and configured SSE KeepAlive to 15s.
 - **New Feature**: Added `/shard` slash command via MCP Prompts for manual, global memory search.
-- **Knowledge Mesh Audit**: Ran `cmd/check_mesh`. All vectors are valid. 4 orphaned shards identified (`doc-mcp`, `migration-success-final-2026-05-10`, `token_efficiency_v1`, `session-summary-2026-05-13-phase8-init`).
 
 ---
-*Status: PHASE 9 COMPLETE | Phase 10 IN PROGRESS (Audit Clean-up) | Date: 2026-05-16*
+*Status: PHASE 10 IN PROGRESS | Date: 2026-05-16*

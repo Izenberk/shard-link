@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"time"
 )
 
@@ -28,4 +29,13 @@ type ShardBond struct {
 	FromID	string
 	ToID	string
 	Weight	float64
+}
+
+// Embedder defines the contract for turning text into high-dimensional vectors.
+// This abstraction allows us to swap between Cloud APIs and Local models.
+type Embedder interface {
+	// Embed generates a vector for the given text.
+	Embed(ctx context.Context, text string) ([]float32, error)
+	// Dimension returns the size of the vector produced by this embedder.
+	Dimension() int
 }

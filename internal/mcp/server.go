@@ -14,12 +14,13 @@ import (
 )
 
 type MCPServer struct {
-	vessel 	storage.Repository
-	mcp 		*server.MCPServer
-	apiKey	string
+	vessel 	 storage.Repository
+	mcp 		 *server.MCPServer
+	apiKey	 string
+	embedder storage.Embedder
 }
 
-func NewMCPServer(v storage.Repository, apiKey string) *MCPServer {
+func NewMCPServer(v storage.Repository, apiKey string, e storage.Embedder) *MCPServer {
 	// 1. Create the base MCP server
 	s := server.NewMCPServer(
 		"Shard-Link Hub",
@@ -30,9 +31,10 @@ func NewMCPServer(v storage.Repository, apiKey string) *MCPServer {
 	)
 
 	mcpSrv := &MCPServer{
-		vessel:	v,
-		mcp:		s,
-		apiKey: apiKey,
+		vessel:	 v,
+		mcp:		 s,
+		apiKey:  apiKey,
+		embedder: e,
 	}
 
 	// 2. Register tools, resources, and prompts BEFORE return
@@ -64,9 +66,11 @@ func (s *MCPServer) withAuth(next http.Handler) http.Handler {
 
 func (s *MCPServer) RegisterTools() {
 	// Tool 1: search_memory
+	// Note: query_vector is now optional if the server has an embedder.
 	searchTool := mcp.NewTool("search_memory",
 		mcp.WithDescription("Search long-term memory using semantic resonance (vector search)"),
-		mcp.WithString("query_vector", mcp.Description("Base64 encoded float32 vector"), mcp.Required()),
+		mcp.WithString("query_text", mcp.Description("Natural language query to embed")),
+		mcp.WithString("query_vector", mcp.Description("Base64 encoded float32 vector (optional if query_text is provided)")),
 		mcp.WithNumber("limit", mcp.Description("Max results to return")),
 	)
 	s.mcp.AddTool(searchTool, s.handleSearch)
@@ -80,19 +84,21 @@ func (s *MCPServer) RegisterTools() {
 	s.mcp.AddTool(searchTextTool, s.handleSearchText)
 
 	// Tool 3: save_memory
+	// Note: vector is now optional; server will generate it if missing.
 	saveTool := mcp.NewTool("save_memory",
 		mcp.WithDescription("Save a new contextual fragment to long-term memory"),
 		mcp.WithString("id", mcp.Description("Unique identifier"), mcp.Required()),
 		mcp.WithString("content", mcp.Description("The text to remember"), mcp.Required()),
 		mcp.WithString("category", mcp.Description("e.g. 'session', 'core', 'memory'"), mcp.Required()),
-		mcp.WithString("vector", mcp.Description("Base64 encoded float32 vector"), mcp.Required()),
+		mcp.WithString("vector", mcp.Description("Base64 encoded float32 vector (optional)")),
 	)
 	s.mcp.AddTool(saveTool, s.handleSave)
 
 	// Tool 4: search_graph
 	graphTool := mcp.NewTool("search_graph",
 		mcp.WithDescription("Search the Knowledge Mesh by finding a central context and traversing its semantic neighbors (Multi-Hop)"),
-		mcp.WithString("query_vector", mcp.Description("Base64 encoded float32 vector"), mcp.Required()),
+		mcp.WithString("query_text", mcp.Description("Natural language query to embed")),
+		mcp.WithString("query_vector", mcp.Description("Base64 encoded float32 vector (optional)")),
 		mcp.WithNumber("limit", mcp.Description("Max neighbors to return")),
 	)
 	s.mcp.AddTool(graphTool, s.handleSearchGraph)
@@ -100,11 +106,25 @@ func (s *MCPServer) RegisterTools() {
 
 func (s *MCPServer) handleSearchGraph(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	vecStr := request.GetString("query_vector", "")
+	text := request.GetString("query_text", "")
 	limit := int(request.GetFloat("limit", 10))
 
-	queryVec, err := base64.StdEncoding.DecodeString(vecStr)
-	if err != nil {
-		return mcp.NewToolResultError("Invalid vector encoding"), nil
+	var queryVec []byte
+	var err error
+
+	if vecStr != "" {
+		queryVec, err = base64.StdEncoding.DecodeString(vecStr)
+		if err != nil {
+			return mcp.NewToolResultError("Invalid vector encoding"), nil
+		}
+	} else if text != "" && s.embedder != nil {
+		floats, err := s.embedder.Embed(ctx, text)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Embedding failed: %v", err)), nil
+		}
+		queryVec = storage.EncodeVector(floats)
+	} else {
+		return mcp.NewToolResultError("Either query_vector or query_text must be provided"), nil
 	}
 
 	results, err := s.vessel.SearchGraph(ctx, queryVec, limit)
@@ -157,23 +177,33 @@ func (s *MCPServer) handleReadCore(ctx context.Context, request mcp.ReadResource
 }
 
 func (s *MCPServer) handleSearch(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	// 1. Parse Arguments
 	vecStr 	:= request.GetString("query_vector", "")
+	text 		:= request.GetString("query_text", "")
 	limit 	:= int(request.GetFloat("limit", 5))
 
-	// 2. Decode Vector from Base64
-	queryVec, err := base64.StdEncoding.DecodeString(vecStr)
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("Invalid vector encoding: %v", err)), nil
+	var queryVec []byte
+	var err error
+
+	if vecStr != "" {
+		queryVec, err = base64.StdEncoding.DecodeString(vecStr)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid vector encoding: %v", err)), nil
+		}
+	} else if text != "" && s.embedder != nil {
+		floats, err := s.embedder.Embed(ctx, text)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Embedding failed: %v", err)), nil
+		}
+		queryVec = storage.EncodeVector(floats)
+	} else {
+		return mcp.NewToolResultError("Either query_vector or query_text must be provided"), nil
 	}
 
-	// 3. Query the Vessel
 	results, err := s.vessel.FindResonant(ctx, queryVec, limit)
 	if err != nil {
 		return nil, err
 	}
 
-	// 4. Format for AI
 	var response string
 	for _, shard := range results {
 		response += fmt.Sprintf("[%s]: %s\n---\n", shard.ID, shard.Content)
@@ -183,17 +213,14 @@ func (s *MCPServer) handleSearch(ctx context.Context, request mcp.CallToolReques
 }
 
 func (s *MCPServer) handleSearchText(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	// 1. Parse Arguments
 	query := request.GetString("query", "")
 	limit := int(request.GetFloat("limit", 5))
 
-	// 2. Query the Vessel
 	results, err := s.vessel.FindText(ctx, query, limit)
 	if err != nil {
 		return nil, err
 	}
 
-	// 3. Format for AI
 	var response string
 	if len(results) == 0 {
 		response = "No matching memory shards found."
@@ -241,23 +268,18 @@ func (s *MCPServer) handleShardPrompt(ctx context.Context, request mcp.GetPrompt
 	), nil
 }
 
-// StartSSE launches the production-grade HTTP bridge with API Key protection.
 func (s *MCPServer) StartSSE(port int, baseURL string) error {
-	// 1. Wrap the MCP server logic in an SSE transport
 	sseServer := server.NewSSEServer(s.mcp,
 		server.WithBaseURL(baseURL),
 		server.WithKeepAliveInterval(15*time.Second),
 	)
 
-	// 2. Setup standard HTTP routing
 	mux := http.NewServeMux()
 
-	// 3. SSE Handler with Auth
 	mux.Handle("/sse", s.withAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sseServer.SSEHandler().ServeHTTP(w, r)
 	})))
 
-	// 4. Message Handler with Auth
 	mux.Handle("/message", s.withAuth(sseServer.MessageHandler()))
 
 	fmt.Printf("Shard-Link Authenticated Bridge ignited on :%d/sse\n", port)
@@ -270,9 +292,22 @@ func (s *MCPServer) handleSave(ctx context.Context, request mcp.CallToolRequest)
 	category := request.GetString("category", "memory")
 	vecStr := request.GetString("vector", "")
 
-	vec, err := base64.StdEncoding.DecodeString(vecStr)
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("Invalid vector encoding: %v", err)), nil
+	var vec []byte
+	var err error
+
+	if vecStr != "" {
+		vec, err = base64.StdEncoding.DecodeString(vecStr)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid vector encoding: %v", err)), nil
+		}
+	} else if content != "" && s.embedder != nil {
+		floats, err := s.embedder.Embed(ctx, content)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Embedding failed: %v", err)), nil
+		}
+		vec = storage.EncodeVector(floats)
+	} else {
+		return mcp.NewToolResultError("Vector must be provided if the server cannot generate it"), nil
 	}
 
 	shard := storage.Shard{

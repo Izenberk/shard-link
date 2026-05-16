@@ -36,12 +36,12 @@ func main() {
 		// Legacy High Performance Mode
 		v, err = storage.NewPostgresVessel(context.Background(), connStr)
 		if err == nil {
-			log.Println("SHARD-LINK: PostgreSQK Vessel Ignited (Lagacy storage)")
+			log.Println("SHARD-LINK: PostgreSQL Vessel Ignited (Legacy storage)")
 		}
 	} else {
 		// Local-First Mode
 		dbPath := os.Getenv("DATABASE_PATH")
-		if dbPath == "" { dbPath = "data/shard-liink.db" }
+		if dbPath == "" { dbPath = "data/shard-link.db" }
 		v, err = storage.NewVessel(dbPath)
 		if err == nil {
 			log.Println("SHARD-LINK: SQLite Vessel Ignited")
@@ -49,7 +49,7 @@ func main() {
 	}
 
 	if err != nil {
-		log.Fatalf("Vessel failed to ignit: %v", err)
+		log.Fatalf("Vessel failed to ignite: %v", err)
 	}
 	defer v.Close()
 
@@ -61,8 +61,13 @@ func main() {
 
 	go jan.Run(ctx)
 
-	// 4. Launch the Authenticated Bridge
-	srv := mcp.NewMCPServer(v, apiKey)
+	// 4. Select the Embedder (Phase 10: Standalone Intelligence)
+	// We use the hardware-friendly MockEmbedder by default.
+	// This can be swapped for a Gemini/OpenAI API embedder later.
+	emb := storage.NewMockEmbedder(1536)
+
+	// 5. Launch the Authenticated Bridge
+	srv := mcp.NewMCPServer(v, apiKey, emb)
 
 	publicURL := os.Getenv("PUBLIC_URL")
 	if publicURL == "" {
