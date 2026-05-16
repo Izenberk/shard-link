@@ -38,12 +38,12 @@ func NewVesselGraph(uri, user, pass, dbName string) (*VesselGraph, error) {
 }
 
 func (v *VesselGraph) ensureIndexes(ctx context.Context) error {
-	// 1. Vector Index for 1536-D embeddings
+	// 1. Vector Index for 768-D embeddings (Optimized for Gemini & RAM)
 	vectorQuery := `
 	CREATE VECTOR INDEX shard_embeddings IF NOT EXISTS
 	FOR (s:Shard) ON (s.embedding)
 	OPTIONS {indexConfig: {
-		` + "`vector.dimensions`" + `: 1536,
+		` + "`vector.dimensions`" + `: 768,
 		` + "`vector.similarity_function`" + `: 'cosine'
 	}}`
 

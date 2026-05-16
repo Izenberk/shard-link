@@ -83,7 +83,7 @@ func main() {
 
 	default:
 		// None Mode: Hardware/Budget constraint fallback
-		emb = storage.NewMockEmbedder(1536)
+		emb = storage.NewMockEmbedder(768)
 		log.Println("SHARD-LINK: Intelligence is in 'Manual/Mock' mode (No embedding)")
 	}
 
