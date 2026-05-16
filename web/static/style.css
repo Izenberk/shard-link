@@ -1,0 +1,143 @@
+:root {
+    --bg-color: #06090f;
+    --panel-bg: rgba(6, 9, 15, 0.9);
+    --panel-border: rgba(88, 166, 255, 0.3);
+    --text-main: #c9d1d9;
+    --text-muted: #8b949e;
+    --accent: #5ef3ff;
+    --shard-glow: #00d4ff; 
+    --doc-glow: #ff7b3a; /* Neural Orange (Positive/Central) */
+    --core-color: #ff9b3a; /* Vibrant Gold/Orange for Core */
+}
+
+body { 
+    font-family: 'JetBrains Mono', monospace; 
+    background: var(--bg-color); 
+    color: var(--text-main); 
+    margin: 0; 
+    overflow: hidden; 
+}
+
+/* SVG Elements */
+.node { 
+    stroke-width: 0; 
+    transition: fill 0.2s, stroke 0.2s, stroke-width 0.2s, r 0.2s, filter 0.2s; 
+    cursor: pointer;
+}
+.node.core { filter: drop-shadow(0 0 12px var(--core-color)); }
+.node.doc { filter: drop-shadow(0 0 10px var(--doc-glow)); }
+.node.memory { filter: drop-shadow(0 0 6px rgba(0, 212, 255, 0.3)); }
+
+.link { 
+    stroke: var(--accent); 
+    stroke-opacity: 0.1; 
+    stroke-width: 0.8px;
+}
+
+/* Selection HUD Overlay */
+.selection-box {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 1px;
+    stroke-opacity: 0.6;
+    pointer-events: none;
+}
+.callout-line {
+    stroke: var(--accent);
+    stroke-width: 1px;
+    stroke-opacity: 0.8;
+    pointer-events: none;
+}
+.callout-dot {
+    fill: #fff;
+    pointer-events: none;
+}
+.hud-text {
+    fill: var(--accent);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    pointer-events: none;
+}
+
+/* Layout */
+#controls { 
+    position: absolute; top: 30px; left: 30px; width: 300px; padding: 0; 
+    z-index: 10; background: none; border: none;
+}
+.control-section {
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    padding: 20px;
+    margin-bottom: 15px;
+    backdrop-filter: blur(10px);
+}
+.search-container {
+    display: flex;
+    align-items: center;
+    background: rgba(94, 243, 255, 0.05);
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    padding: 0 10px;
+}
+.search-icon { color: var(--accent); font-size: 14px; margin-right: 10px; }
+input { 
+    background: none; border: none; color: var(--text-main); 
+    padding: 12px 0; width: 100%; 
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+}
+input:focus { outline: none; }
+
+h3 { margin: 0 0 15px 0; color: var(--accent); font-size: 11px; letter-spacing: 2px; border-bottom: 1px solid var(--panel-border); padding-bottom: 10px; text-transform: uppercase; }
+.legend-item { display: flex; align-items: center; margin-bottom: 8px; font-size: 11px; }
+.legend-color { width: 8px; height: 8px; border-radius: 50%; margin-right: 10px; }
+
+/* HUD Buttons */
+.btn-group { display: flex; gap: 10px; margin-top: 15px; }
+.hud-btn {
+    background: rgba(94, 243, 255, 0.1);
+    border: 1px solid var(--panel-border);
+    color: var(--accent);
+    padding: 8px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    transition: all 0.2s;
+    flex-grow: 1;
+    text-align: center;
+}
+.hud-btn:hover {
+    background: rgba(94, 243, 255, 0.2);
+    border-color: var(--accent);
+    box-shadow: 0 0 10px rgba(94, 243, 255, 0.3);
+}
+
+/* Details Sidebar */
+#details { 
+    position: absolute; top: 0; right: 0; width: 400px; height: 100vh; 
+    padding: 0; display: none; z-index: 10;
+    background: var(--panel-bg);
+    backdrop-filter: blur(20px);
+    border-left: 1px solid var(--panel-border);
+    display: flex; flex-direction: column;
+    transform: translateX(100%); transition: transform 0.3s ease;
+}
+#details.active { transform: translateX(0); display: flex; }
+
+.detail-header { 
+    padding: 30px; border-bottom: 1px solid var(--panel-border);
+    display: flex; justify-content: space-between; align-items: center;
+}
+.detail-header-title { color: var(--accent); font-weight: 700; font-size: 12px; letter-spacing: 2px; }
+
+.detail-body { padding: 30px; overflow-y: auto; flex-grow: 1; }
+.detail-field { margin-bottom: 25px; }
+.detail-label { color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 8px; display: block; }
+.detail-value { font-weight: 500; color: #fff; font-size: 13px; line-height: 1.5; }
+
+.content-box { 
+    background: rgba(0,0,0,0.4); padding: 20px; border: 1px solid var(--panel-border);
+    color: #d1d5db; white-space: pre-wrap; margin-top: 10px; 
+    font-family: 'Inter', sans-serif; font-size: 14px;
+}

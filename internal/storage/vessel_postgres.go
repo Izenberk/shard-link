@@ -261,9 +261,10 @@ func (v *PostgresVessel) GetAllBonds(ctx context.Context) ([]ShardBond, error) {
 	return bonds, rows.Err()
 }
 
-func (v *PostgresVessel) SearchGraph(ctx context.Context, queryVector []byte, limit int) ([]Shard, error) {
+func (v *PostgresVessel) SearchGraph(ctx context.Context, queryVector []byte, limit int) ([]Shard, []ShardBond, error) {
 	// Postgres fallback to vector search
-	return v.FindResonant(ctx, queryVector, limit)
+	shards, err := v.FindResonant(ctx, queryVector, limit)
+	return shards, nil, err
 }
 
 func (v *PostgresVessel) GetGraphData(ctx context.Context) ([]Shard, []ShardBond, error) {

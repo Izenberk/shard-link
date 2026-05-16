@@ -130,17 +130,18 @@ func (s *MCPServer) handleSearchGraph(ctx context.Context, request mcp.CallToolR
 		return mcp.NewToolResultError("Either query_vector or query_text must be provided"), nil
 	}
 
-	results, err := s.vessel.SearchGraph(ctx, queryVec, limit)
+	shards, bonds, err := s.vessel.SearchGraph(ctx, queryVec, limit)
 	if err != nil {
 		log.Printf("[MCP ERROR] search_graph failed: %v", err)
 		return nil, err
 	}
 
 	var response string
-	if len(results) == 0 {
+	if len(shards) == 0 {
 		response = "No connected neighbors found for this context."
 	} else {
-		for _, shard := range results {
+		response = fmt.Sprintf("Found %d shards and %d bonds:\n---\n", len(shards), len(bonds))
+		for _, shard := range shards {
 			response += fmt.Sprintf("[%s]: %s\n---\n", shard.ID, shard.Content)
 		}
 	}

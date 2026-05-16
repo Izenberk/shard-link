@@ -26,7 +26,12 @@ Shard-Link is a high-performance context engine designed to provide "long-term m
   - **Logic:** Eviction is based on **Resonance** (semantic similarity) and **Relational Centrality**.
   - **Constraint:** Prioritize keeping shards that act as "hubs" for multiple contexts.
 
-## 4. Development Philosophy & Mentorship
+## 5. Knowledge Mesh Thresholds
+The system utilizes tunable thresholds to manage connectivity and memory preservation. These are managed via environment variables:
+- `MESH_LINK_THRESHOLD`: The minimum cosine similarity (default 0.70) required for the `auto_link` tool to create a permanent relationship between shards.
+- `JANITOR_RESONANCE_THRESHOLD`: The minimum resonance (default 0.70) required to protect a non-core shard from eviction by the Janitor.
+
+## 6. Development Philosophy & Mentorship
 - **Active Learning via Typing:** Provide the **full, complete code** for implementations. Do not play "puzzle games" by only providing scaffolding or boilerplate.
 - **The "Why" First:** Always explain the architectural logic and trade-offs BEFORE providing the code.
 - **Muscle Memory:** The developer will learn by typing out the full code you provide. Encourage them to type it rather than copy-pasting to build deep understanding.

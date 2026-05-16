@@ -20,7 +20,7 @@ type Repository interface {
 	GetAllBonds(ctx context.Context) ([]ShardBond, error)
 
 	// Mesh Intelligence
-	SearchGraph(ctx context.Context, queryVector []byte, limit int) ([]Shard, error)
+	SearchGraph(ctx context.Context, queryVector []byte, limit int) ([]Shard, []ShardBond, error)
 	GetGraphData(ctx context.Context) ([]Shard, []ShardBond, error)
 	CalculateCommunities(ctx context.Context) (int, error)
 

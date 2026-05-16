@@ -1,10 +1,13 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"math"
+	"net/http"
 
 	"github.com/google/generative-ai-go/genai"
 	"google.golang.org/api/option"
@@ -65,23 +68,61 @@ func (g *GeminiEmbedder) Close() error {
 	return g.client.Close()
 }
 
-// --- 3. TINY LOCAL EMBEDDER (Option: "local") ---
+// --- 3. OLLAMA EMBEDDER (Option: "local") ---
 
-type TinyLocalEmbedder struct {
-	// Placeholder for future Go-native lightweight model
+type OllamaEmbedder struct {
+	url   string
+	model string
 }
 
-func NewTinyLocalEmbedder() *TinyLocalEmbedder {
-	return &TinyLocalEmbedder{}
+func NewOllamaEmbedder(url, model string) *OllamaEmbedder {
+	if url == "" {
+		url = "http://localhost:11434"
+	}
+	if model == "" {
+		model = "nomic-embed-text"
+	}
+	return &OllamaEmbedder{url: url, model: model}
 }
 
-func (l *TinyLocalEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
-	// For now, this acts like a more 'advanced' mock until we pick a library
-	return []float32{0.1, 0.2, 0.3}, nil
+type ollamaResponse struct {
+	Embedding []float32 `json:"embedding"`
 }
 
-func (l *TinyLocalEmbedder) Dimension() int {
-	return 3072
+func (o *OllamaEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+	payload := map[string]string{
+		"model":  o.model,
+		"prompt": text,
+	}
+	body, _ := json.Marshal(payload)
+
+	req, _ := http.NewRequestWithContext(ctx, "POST", o.url+"/api/embeddings", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("ollama request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ollama returned status: %d", resp.StatusCode)
+	}
+
+	var res ollamaResponse
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return nil, fmt.Errorf("failed to decode ollama response: %w", err)
+	}
+
+	return res.Embedding, nil
+}
+
+func (o *OllamaEmbedder) Dimension() int {
+	// Adjust based on the model (nomic is usually 768, mxbai is 1024)
+	// For consistency with Shard-Link's 3072-D standard, we might need a model that supports it
+	// or update the system to be dimension-agnostic.
+	return 768 
 }
 
 // --- HELPERS ---

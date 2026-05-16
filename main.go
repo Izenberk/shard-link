@@ -85,9 +85,11 @@ func main() {
 		log.Printf("SHARD-LINK: Cloud Intelligence Active (%s)", model)
 		
 	case "local":
-		// Local Mode: Privacy-first, runs a tiny model on local CPU
-		emb = storage.NewTinyLocalEmbedder()
-		log.Println("SHARD-LINK: Tiny Local Intelligence Active (Placeholder)")
+		// Local Mode: Privacy-first, runs a model via Ollama
+		ollamaURL := os.Getenv("OLLAMA_URL")
+		ollamaModel := os.Getenv("OLLAMA_MODEL")
+		emb = storage.NewOllamaEmbedder(ollamaURL, ollamaModel)
+		log.Printf("SHARD-LINK: Ollama Intelligence Active (%s)", ollamaModel)
 
 	default:
 		// None Mode: Hardware/Budget constraint fallback

@@ -14,28 +14,31 @@ This document tracks the resolution of architectural bottlenecks and outlines fu
 - `Score = (Links * Centrality) / (Time^Decay)`
 - This protects foundational data (high links/centrality) regardless of age, while naturally fading irrelevant context.
 
-## 🚀 Current Focus: Multi-Tenancy, Local Inference & UI
+## ✅ Resolved: Visual Ego Live Dashboard (2026-05-16)
+**The Problem:** The `visual_ego` tool was a static HTML generator, requiring a manual rebuild to see Knowledge Mesh changes.
+**The Solution:** Converted `cmd/visual_ego` into a live Go HTTP server.
+- Extracted frontend to `web/static/`.
+- Implemented `/api/graph` for real-time mesh data fetching with Louvain/PageRank analysis.
+- Implemented `/api/search` for semantic "Multi-Hop" sub-graph exploration.
 
-### 1. Visual Ego Live Dashboard (Planned UI Upgrade)
-- **Goal:** Upgrade the `visual_ego` tool from a static HTML generator to the primary live-serving frontend, replacing the Neo4j query UI.
-- **Requirements:**
-  - Convert `cmd/visual_ego` into a live Go `http.Server`.
-  - Extract the D3.js HTML/CSS/JS into a separate `web/static/` directory.
-  - Implement an `/api/graph` endpoint for live data fetching without page reloads.
-  - Implement an `/api/search` endpoint utilizing `SearchGraph` for real-time "Multi-Hop" sub-graph exploration.
-  - Future: Add interactive hooks in the D3 UI to edit or delete shards directly from the graph view.
+## ✅ Resolved: Local Embedding Pipeline (2026-05-16)
+**The Problem:** Dependency on external APIs (Gemini) posed a long-term privacy and availability risk.
+**The Solution:** Implemented the `OllamaEmbedder` provider.
+- Added dynamic configuration via `EMBEDDING_MODE=local`.
+- Supported local models (e.g., `nomic-embed-text`) via the Ollama REST API.
 
-### 2. Multi-Tenant Isolation
-- **Goal:** Support isolated memory vessels for multiple users within the same Postgres instance.
-- **Requirement:** Add `UserID` indexing to the `shards` table and enforce ownership checks in the Repository layer.
+## ✅ Resolved: Janitor Refinement: Graph Centrality & Core Resonance (2026-05-16)
+**The Problem:** Eviction logic was purely structural, potentially deleting disconnected but semantically vital personal context.
+**The Solution:** Integrated **Core Resonance Protection** and **PageRank Centrality**.
+- Shards with high similarity (>0.70) to Core Identity shards are now automatically protected.
+- Eviction targets are now identified using PageRank (via GDS) to preserve "hub" shards that link disparate contexts.
+- All thresholds externalized to `.env` for transparent tuning.
 
-### 3. Phase 8: Local Embedding Pipeline
-- **Goal:** Eliminate the dependency on external embedding APIs.
-- **Requirement:** Integrate a local embedder (e.g., Ollama or Go-native `local-embed`) to handle the 1536-D generation during `save_memory`.
+## 🚀 Current Focus: Autonomous Memory & Relational Synthesis
 
-### 4. Janitor Refinement: Graph Centrality
-- **Goal:** More accurately identify "hub" shards.
-- **Requirement:** Implement a lightweight PageRank-inspired centrality check during the scoring phase to ensure the Knowledge Mesh remains structurally sound.
+### 1. Automatic Relational Synthesis (Phase 11)
+- **Goal:** Enable the system to autonomously "think" and link disparate memories without manual triggers.
+- **Requirement:** Refactor the `auto_link` tool into a periodic background service (similar to the Janitor) to maintain Knowledge Mesh density in real-time.
 
 ---
-*Last Updated: 2026-05-14*
+*Last Updated: 2026-05-16*

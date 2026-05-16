@@ -3,7 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
-	"log"
+	"os"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
@@ -122,19 +122,30 @@ func (v *VesselGraph) FindResonant(ctx context.Context, queryVector []byte, limi
 
 // GetEvictionCandidates identifies "Orphan" shards (low centrality/links) using PageRank
 func (v *VesselGraph) GetEvictionCandidates(ctx context.Context, limit int) ([]string, error) {
-	// 1. Try PageRank via GDS
+	threshold := os.Getenv("JANITOR_RESONANCE_THRESHOLD")
+	if threshold == "" {
+		threshold = "0.70"
+	}
+
+	// 1. Try PageRank via GDS + Core Resonance protection
 	const projectionQuery = `
 	CALL gds.graph.project('janitorGraph', 'Shard', 'CONNECTED_TO', {
 		relationshipProperties: 'weight'
 	}) YIELD graphName
 	`
 	const pageRankQuery = `
+	MATCH (core:Shard {category: 'core'})
+	MATCH (s:Shard) WHERE s.category <> 'core'
+	WITH s, core, gds.similarity.cosine(s.embedding, core.embedding) as sim
+	WITH s, max(sim) as maxResonance
+	WHERE maxResonance < parseFloat($threshold)
+	
 	CALL gds.pageRank.stream('janitorGraph', {
 		relationshipWeightProperty: 'weight'
 	})
 	YIELD nodeId, score
-	WITH gds.util.asNode(nodeId) AS s, score
-	WHERE s.category <> 'core'
+	WHERE gds.util.asNode(nodeId).id = s.id
+	
 	RETURN s.id
 	ORDER BY score ASC, s.last_used ASC
 	LIMIT $limit
@@ -153,8 +164,8 @@ func (v *VesselGraph) GetEvictionCandidates(ctx context.Context, limit int) ([]s
 			return nil, err
 		}
 
-		// Run PageRank
-		res, err := tx.Run(ctx, pageRankQuery, map[string]any{"limit": limit})
+		// Run PageRank with Resonance filtering
+		res, err := tx.Run(ctx, pageRankQuery, map[string]any{"limit": limit, "threshold": threshold})
 		if err != nil {
 			return nil, err
 		}
@@ -173,17 +184,21 @@ func (v *VesselGraph) GetEvictionCandidates(ctx context.Context, limit int) ([]s
 		return ids, nil
 	}
 
-	// 2. Fallback to Degree Centrality if GDS fails or no links exist
+	// 2. Fallback to Degree Centrality + Core Resonance protection if GDS fails or no links exist
 	fallbackQuery := `
-	MATCH (s:Shard)
-	WHERE s.category <> 'core'
+	MATCH (core:Shard {category: 'core'})
+	MATCH (s:Shard) WHERE s.category <> 'core'
+	WITH s, core, gds.similarity.cosine(s.embedding, core.embedding) as sim
+	WITH s, max(sim) as maxResonance
+	WHERE maxResonance < parseFloat($threshold)
+
 	OPTIONAL MATCH (s)-[r]-()
 	WITH s, count(r) as links
 	ORDER BY links ASC, s.last_used ASC
 	LIMIT $limit
 	RETURN s.id
 	`
-	params := map[string]any{"limit": limit}
+	params := map[string]any{"limit": limit, "threshold": threshold}
 
 	result, err := neo4j.ExecuteQuery(ctx, v.driver, fallbackQuery, params, neo4j.EagerResultTransformer,
 		neo4j.ExecuteQueryWithDatabase(v.dbName))
@@ -462,36 +477,56 @@ func (v *VesselGraph) GetCoreShards(ctx context.Context) ([]Shard, error) {
 	return shards, nil
 }
 
-func (v *VesselGraph) SearchGraph(ctx context.Context, queryVector []byte, limit int) ([]Shard, error) {
-	// Diagnostic Logging
+func (v *VesselGraph) SearchGraph(ctx context.Context, queryVector []byte, limit int) ([]Shard, []ShardBond, error) {
 	vec := decodeVector(queryVector)
-	log.Printf("[DEBUG] SearchGraph: Decoded vector has %d elements (original bytes: %d)", len(vec), len(queryVector))
-
-	// Find the closest shard, then get its neighbors (Multi-Hop)
+	
+	// Multi-Hop: Find the center AND its connected neighbors + relationships
 	query := `
 	CALL db.index.vector.queryNodes('shard_embeddings', 1, $vector)
 	YIELD node AS center, score
-	MATCH (center)-[:CONNECTED_TO]-(neighbor:Shard)
-	RETURN neighbor
-	LIMIT $limit
+	OPTIONAL MATCH (center)-[r:CONNECTED_TO]-(neighbor:Shard)
+	RETURN center, collect({node: neighbor, weight: r.weight}) as neighbors
 	`
 	params := map[string]any{
 		"vector": vec,
-		"limit":  limit,
 	}
 
 	result, err := neo4j.ExecuteQuery(ctx, v.driver, query, params, neo4j.EagerResultTransformer,
 		neo4j.ExecuteQueryWithDatabase(v.dbName))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var shards []Shard
-	for _, record := range result.Records {
-		node, _ := record.Get("neighbor")
-		shards = append(shards, nodeToShard(node.(neo4j.Node)))
+	var bonds []ShardBond
+	
+	if len(result.Records) > 0 {
+		record := result.Records[0]
+		centerNode, _ := record.Get("center")
+		centerShard := nodeToShard(centerNode.(neo4j.Node))
+		shards = append(shards, centerShard)
+
+		neighbors, _ := record.Get("neighbors")
+		for _, nMap := range neighbors.([]any) {
+			m := nMap.(map[string]any)
+			neighborNode := m["node"]
+			if neighborNode == nil {
+				continue
+			}
+			
+			neighborShard := nodeToShard(neighborNode.(neo4j.Node))
+			shards = append(shards, neighborShard)
+			
+			// Capture the bond
+			weight, _ := m["weight"].(float64)
+			bonds = append(bonds, ShardBond{
+				FromID: centerShard.ID,
+				ToID:   neighborShard.ID,
+				Weight: weight,
+			})
+		}
 	}
-	return shards, nil
+	return shards, bonds, nil
 }
 
 func (v *VesselGraph) GetGraphData(ctx context.Context) ([]Shard, []ShardBond, error) {

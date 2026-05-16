@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"os"
 	"sync"
 	"time"
 
@@ -290,13 +291,24 @@ func (v *Vessel) GetCount(ctx context.Context) (int, error) {
 }
 
 func (v *Vessel) GetEvictionCandidates(ctx context.Context, limit int) ([]string, error) {
+	thresholdStr := os.Getenv("JANITOR_RESONANCE_THRESHOLD")
+	if thresholdStr == "" {
+		thresholdStr = "0.70"
+	}
+
+	// Protection Logic: Exclude 'core' shards and shards with high resonance to core
 	const query = `
-		SELECT id FROM shards
-		WHERE category != 'core'
-			AND id NOT IN (SELECT to_id FROM shard_bonds WHERE weight > 0.85)
+		SELECT s.id FROM shards s
+		WHERE s.category != 'core'
+			AND s.id NOT IN (SELECT to_id FROM shard_bonds WHERE weight > ?)
+			AND NOT EXISTS (
+				SELECT 1 FROM shards core
+				WHERE core.category = 'core'
+					AND (1.0 - vec_distance_cosine(s.vector, core.vector)) > ?
+			)
 		ORDER BY
-			last_used ASC,
-			(SELECT COUNT(*) FROM shard_bonds WHERE from_id = shards.id OR to_id = shards.id) ASC
+			s.last_used ASC,
+			(SELECT COUNT(*) FROM shard_bonds WHERE from_id = s.id OR to_id = s.id) ASC
 		LIMIT ?;
 	`
 	stmt, _, err := v.conn.Prepare(query)
@@ -305,7 +317,9 @@ func (v *Vessel) GetEvictionCandidates(ctx context.Context, limit int) ([]string
 	}
 	defer stmt.Close()
 
-	stmt.BindInt(1, limit)
+	stmt.BindText(1, thresholdStr)
+	stmt.BindText(2, thresholdStr)
+	stmt.BindInt(3, limit)
 
 	var ids []string
 	for stmt.Step() {
@@ -360,9 +374,10 @@ func (v *Vessel) GetAllBonds(ctx context.Context) ([]ShardBond, error) {
 	return bonds, stmt.Err()
 }
 
-func (v *Vessel) SearchGraph(ctx context.Context, queryVector []byte, limit int) ([]Shard, error) {
+func (v *Vessel) SearchGraph(ctx context.Context, queryVector []byte, limit int) ([]Shard, []ShardBond, error) {
 	// SQLite fallback to vector search
-	return v.FindResonant(ctx, queryVector, limit)
+	shards, err := v.FindResonant(ctx, queryVector, limit)
+	return shards, nil, err
 }
 
 func (v *Vessel) GetGraphData(ctx context.Context) ([]Shard, []ShardBond, error) {

@@ -69,13 +69,21 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 - [x] **Intelligence Abstraction**: Defined the `Embedder` interface to support multiple providers.
 - [x] **Cloud Embedder**: Implemented Gemini API integration (Zero local hardware load).
 - [x] **Configurable Modes**: Added `EMBEDDING_MODE` (none, server, local) to main.go.
-- [ ] Integrate a **Local Embedding Tool** (e.g., Ollama or a Go-native wrapper).
-- [ ] **Dimension Right-sizing**: Transition to 384-D or 512-D embeddings to optimize RAM and speed.
+- [x] **Local Embedding**: Implemented the `OllamaEmbedder` provider for 100% private inference.
+- [x] **Resonance-Aware Janitor**: Integrated Core Resonance protection (0.70 threshold) and PageRank centrality to the eviction engine.
+- [x] **Visual Ego Live**: Converted the graph visualizer into a dynamic, real-time HTTP dashboard with sub-graph search.
+
+## Phase 11: Autonomous Memory (Relational Synthesis)
+- [ ] **Background Synthesis**: Refactor `auto_link` logic into a background worker.
+- [ ] **On-Save Linking**: Automatically trigger similarity checks when a new shard is saved.
+- [ ] **Clustering Analytics**: Expose Louvain community labels in the Visual Ego dashboard to show "Knowledge Neighborhoods."
+- [ ] **Interactive Edges**: Implement the ability to manually create or break bonds via the Visual Ego UI.
 
 ## Recent Progress (2026-05-16)
-- **Multi-Mode Intelligence**: Implemented three embedding options (None, Server/Gemini, Local Placeholder).
-- **Dependency Management**: Integrated the Google Generative AI Go SDK for server-side vector generation.
-- **Hub Autonomy**: Updated the Hub to detect missing vectors and generate them on-the-fly using the configured embedder.
+- **Visual Ego Live**: Upgraded to a dynamic Go server with live GDS analysis and semantic search.
+- **Relational Integrity**: Established the first semantic bonds between personal identity shards.
+- **Janitor Intelligence**: Refined eviction logic to protect shards resonating with the user's core profile.
+- **Configurability**: Externalized all Knowledge Mesh thresholds to `.env`.
 
 ---
-*Status: PHASE 10 IN PROGRESS | Date: 2026-05-16*
+*Status: PHASE 11 INITIATED | Date: 2026-05-16*
