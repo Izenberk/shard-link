@@ -35,3 +35,11 @@ certs/
 # OS files
 .DS_Store
 Thumbs.db
+neo4j_data/
+neo4j_logs/
+neo4j_plugins/
+*.txt
+*.html
+*.sh
+*.py
+neo4j_records.json

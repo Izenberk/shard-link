@@ -1,7 +1,7 @@
-description = "Global memory search via Shard-Link (MCP)"
+description = "Shard-Link: General Memory Interface"
 prompt = """
-You MUST use the 'mcp_shard-link_search_text' tool (and 'mcp_shard-link_search_memory' if needed) to find shards related to '{{args}}'. 
-DO NOT use direct 'sqlite3' shell commands. 
-The Neo4j Knowledge Mesh is the primary source of truth for this project. 
-Summarize the results from the MCP tool call.
+You are the Shard-Link architect. Use the available MCP tools (save_memory, search_text, search_memory, search_graph) to fulfill the following request: '{{args}}'.
+The Neo4j Knowledge Mesh is the primary source of truth. 
+DO NOT use direct shell commands. 
+Provide a high-signal response based on the tool results.
 """

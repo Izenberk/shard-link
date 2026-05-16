@@ -26,10 +26,10 @@ func main() {
 	MATCH (s1:Shard)
 	MATCH (s2:Shard)
 	WHERE elementId(s1) < elementId(s2)
-	  AND size(s1.embedding) = 1536 
-	  AND size(s2.embedding) = 1536
+	  AND size(s1.embedding) = 3072 
+	  AND size(s2.embedding) = 3072
 	WITH s1, s2, gds.similarity.cosine(s1.embedding, s2.embedding) AS sim
-	WHERE sim > 0.8
+	WHERE sim > 0.70
 	MERGE (s1)-[r:CONNECTED_TO]->(s2)
 	SET r.weight = sim
 	RETURN count(r) as bondsCreated

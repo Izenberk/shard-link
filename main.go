@@ -73,7 +73,7 @@ func main() {
 
 		model := os.Getenv("EMBEDDING_MODEL")
 		if model == "" {
-			model = "embedding-001"
+			model = "gemini-embedding-001"
 		}
 		
 		geminiEmb, err := storage.NewGeminiEmbedder(ctx, geminiKey, model)
@@ -90,7 +90,7 @@ func main() {
 
 	default:
 		// None Mode: Hardware/Budget constraint fallback
-		emb = storage.NewMockEmbedder(768)
+		emb = storage.NewMockEmbedder(3072)
 		log.Println("SHARD-LINK: Intelligence is in 'Manual/Mock' mode (No embedding)")
 	}
 

@@ -18,8 +18,8 @@ var schema string
 // Add the Pool
 var vectorPool = sync.Pool{
 	New: func() any {
-		// We pre-allocate 768 slots (the new optimized standard for Phase 10)
-		return make([]float32, 768)
+		// We pre-allocate 3072 slots (Production Gemini Standard)
+		return make([]float32, 3072)
 	},
 }
 
@@ -408,7 +408,7 @@ func decodeVector(b []byte) []float32 {
 	}
 	limit := len(b) / 4
 	var v []float32
-	if limit <= 768 {
+	if limit <= 3072 {
 		v = vectorPool.Get().([]float32)
 		v = v[:limit]
 	} else {

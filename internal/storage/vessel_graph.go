@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
@@ -38,12 +39,12 @@ func NewVesselGraph(uri, user, pass, dbName string) (*VesselGraph, error) {
 }
 
 func (v *VesselGraph) ensureIndexes(ctx context.Context) error {
-	// 1. Vector Index for 768-D embeddings (Optimized for Gemini & RAM)
+	// 1. Vector Index for 3072-D embeddings (Production Gemini Standard)
 	vectorQuery := `
 	CREATE VECTOR INDEX shard_embeddings IF NOT EXISTS
 	FOR (s:Shard) ON (s.embedding)
 	OPTIONS {indexConfig: {
-		` + "`vector.dimensions`" + `: 768,
+		` + "`vector.dimensions`" + `: 3072,
 		` + "`vector.similarity_function`" + `: 'cosine'
 	}}`
 
@@ -462,6 +463,10 @@ func (v *VesselGraph) GetCoreShards(ctx context.Context) ([]Shard, error) {
 }
 
 func (v *VesselGraph) SearchGraph(ctx context.Context, queryVector []byte, limit int) ([]Shard, error) {
+	// Diagnostic Logging
+	vec := decodeVector(queryVector)
+	log.Printf("[DEBUG] SearchGraph: Decoded vector has %d elements (original bytes: %d)", len(vec), len(queryVector))
+
 	// Find the closest shard, then get its neighbors (Multi-Hop)
 	query := `
 	CALL db.index.vector.queryNodes('shard_embeddings', 1, $vector)
@@ -471,7 +476,7 @@ func (v *VesselGraph) SearchGraph(ctx context.Context, queryVector []byte, limit
 	LIMIT $limit
 	`
 	params := map[string]any{
-		"vector": decodeVector(queryVector),
+		"vector": vec,
 		"limit":  limit,
 	}
 

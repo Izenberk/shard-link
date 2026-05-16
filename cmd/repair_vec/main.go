@@ -57,13 +57,12 @@ func main() {
 }
 
 func generateMockEmbedding(content string) []float32 {
-	vec := make([]float32, 1536)
+	vec := make([]float32, 3072)
 	hash := sha256.Sum256([]byte(content))
 	
 	// Seed the vector with hash values
-	for i := 0; i < 1536; i++ {
+	for i := 0; i < 3072; i++ {
 		// Use different parts of the hash to create pseudo-random but deterministic floats
-		// We shift the start point to mix it up
 		start := (i * 7) % (32 - 4)
 		chunk := hash[start : start+4]
 		bits := binary.LittleEndian.Uint32(chunk)

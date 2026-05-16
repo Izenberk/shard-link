@@ -57,8 +57,8 @@ func (g *GeminiEmbedder) Embed(ctx context.Context, text string) ([]float32, err
 }
 
 func (g *GeminiEmbedder) Dimension() int {
-	// Standard for text-embedding-004
-	return 768 
+	// Standard for gemini-embedding-001
+	return 3072 
 }
 
 func (g *GeminiEmbedder) Close() error {
@@ -81,7 +81,7 @@ func (l *TinyLocalEmbedder) Embed(ctx context.Context, text string) ([]float32, 
 }
 
 func (l *TinyLocalEmbedder) Dimension() int {
-	return 768
+	return 3072
 }
 
 // --- HELPERS ---
