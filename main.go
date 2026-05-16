@@ -54,17 +54,38 @@ func main() {
 	defer v.Close()
 
 	// 3. Summon the Janitor
-	// Adjusted interval from 1m to 15m to reduce resource spikes
 	jan := janitor.NewJanitor(v, 15*time.Minute, 1000)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
 	go jan.Run(ctx)
 
-	// 4. Select the Embedder (Phase 10: Standalone Intelligence)
-	// We use the hardware-friendly MockEmbedder by default.
-	// This can be swapped for a Gemini/OpenAI API embedder later.
-	emb := storage.NewMockEmbedder(1536)
+	// 4. Configure Intelligence (Phase 10: Standalone Intelligence)
+	var emb storage.Embedder
+	mode := os.Getenv("EMBEDDING_MODE") // options: "none", "server", "local"
+	
+	switch mode {
+	case "server":
+		// Cloud Mode: Zero local hardware load, utilizes Gemini API
+		model := os.Getenv("EMBEDDING_MODEL")
+		if model == "" { model = "text-embedding-004" }
+		
+		geminiEmb, err := storage.NewGeminiEmbedder(ctx, apiKey, model)
+		if err != nil {
+			log.Fatalf("Failed to ignite Cloud Embedder: %v", err)
+		}
+		emb = geminiEmb
+		log.Printf("SHARD-LINK: Cloud Intelligence Active (%s)", model)
+		
+	case "local":
+		// Local Mode: Privacy-first, runs a tiny model on local CPU
+		emb = storage.NewTinyLocalEmbedder()
+		log.Println("SHARD-LINK: Tiny Local Intelligence Active (Placeholder)")
+
+	default:
+		// None Mode: Hardware/Budget constraint fallback
+		emb = storage.NewMockEmbedder(1536)
+		log.Println("SHARD-LINK: Intelligence is in 'Manual/Mock' mode (No embedding)")
+	}
 
 	// 5. Launch the Authenticated Bridge
 	srv := mcp.NewMCPServer(v, apiKey, emb)
@@ -75,7 +96,6 @@ func main() {
 	}
 
 	go func() {
-		// Port 8080 is always internal; Cloudflare provides the outer HTTPS layer
 		if err := srv.StartSSE(8080, publicURL); err != nil {
 			log.Fatalf("Bridge collapsed: %v", err)
 		}

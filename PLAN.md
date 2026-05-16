@@ -67,16 +67,15 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 - [x] **Direct Access**: Implemented MCP Prompt for direct slash-command retrieval (`/shard`).
 - [x] **Stability Patch**: Optimized SSE KeepAlive (15s) and Neo4j heap sizing (2GB).
 - [x] **Intelligence Abstraction**: Defined the `Embedder` interface to support multiple providers.
-- [x] **Automatic Generation**: Hub now generates vectors if missing during `save_memory`.
-- [ ] Integrate a **Cloud Embedder** (Gemini API) for hardware-friendly production use.
+- [x] **Cloud Embedder**: Implemented Gemini API integration (Zero local hardware load).
+- [x] **Configurable Modes**: Added `EMBEDDING_MODE` (none, server, local) to main.go.
 - [ ] Integrate a **Local Embedding Tool** (e.g., Ollama or a Go-native wrapper).
 - [ ] **Dimension Right-sizing**: Transition to 384-D or 512-D embeddings to optimize RAM and speed.
 
 ## Recent Progress (2026-05-16)
-- **Phase 10 Ignition**: Defined `Embedder` interface and implemented `MockEmbedder` for hardware-friendly development.
-- **Hub Intelligence**: Updated `MCPServer` to support optional vectors; the Hub now uses the embedder to generate vectors from text if they aren't provided.
-- **MCP Stability**: Adjusted Janitor frequency to 15m, tuned Neo4j heap/pagecache, and configured SSE KeepAlive to 15s.
-- **New Feature**: Added `/shard` slash command via MCP Prompts for manual, global memory search.
+- **Multi-Mode Intelligence**: Implemented three embedding options (None, Server/Gemini, Local Placeholder).
+- **Dependency Management**: Integrated the Google Generative AI Go SDK for server-side vector generation.
+- **Hub Autonomy**: Updated the Hub to detect missing vectors and generate them on-the-fly using the configured embedder.
 
 ---
 *Status: PHASE 10 IN PROGRESS | Date: 2026-05-16*
