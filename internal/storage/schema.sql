@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS shards (
     id          TEXT PRIMARY KEY,
     category    TEXT NOT NULL,      -- 'core', 'session', 'memory'
     content     TEXT NOT NULL,
-    vector      BLOB NOT NULL,      -- 768-D float32 vector (Optimized for Gemini & RAM)
+    vector      BLOB NOT NULL,      -- 3072-D float32 vector (Production Gemini Standard)
     metadata    BLOB,               -- SQLite JSONB
     
     -- Phase 9: Source Provenance

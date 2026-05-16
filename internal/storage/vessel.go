@@ -52,11 +52,11 @@ func NewVessel(path string) (*Vessel, error) {
 		v2 := decodeVector(arg[1].RawBlob())
 
 		defer func() {
-			if v1 != nil && cap(v1) == 768 {
-				vectorPool.Put(v1[:768])
+			if v1 != nil && cap(v1) == 3072 {
+				vectorPool.Put(v1[:3072])
 			}
-			if v2 != nil && cap(v2) == 768 {
-				vectorPool.Put(v2[:768])
+			if v2 != nil && cap(v2) == 3072 {
+				vectorPool.Put(v2[:3072])
 			}
 		}()
 

@@ -53,7 +53,7 @@ func main() {
 	for i, s := range shards {
 		log.Printf("[%d/%d] Embedding shard: %s", i+1, len(shards), s.ID)
 
-		// Call Gemini API to get real 768-D vector
+		// Call Gemini API to get real 3072-D vector
 		floats, err := emb.Embed(ctx, s.Content)
 		if err != nil {
 			log.Printf("ERROR: Failed to embed %s: %v", s.ID, err)
@@ -71,5 +71,5 @@ func main() {
 		}
 	}
 
-	log.Println(">>> MISSION COMPLETE: All shards now have high-precision 768-D vectors.")
+	log.Println(">>> MISSION COMPLETE: All shards now have high-precision 3072-D vectors.")
 }
