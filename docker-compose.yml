@@ -20,7 +20,7 @@ services:
       - HUB_API_KEY=${HUB_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - EMBEDDING_MODE=${EMBEDDING_MODE:-none}
-      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-004}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-embedding-001}
     ports:
       - "8080:8080"
     restart: unless-stopped
