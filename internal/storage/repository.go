@@ -23,6 +23,7 @@ type Repository interface {
 	SearchGraph(ctx context.Context, queryVector []byte, limit int) ([]Shard, []ShardBond, error)
 	GetGraphData(ctx context.Context) ([]Shard, []ShardBond, error)
 	CalculateCommunities(ctx context.Context) (int, error)
+	SyncBonds(ctx context.Context, threshold float64) (int, error)
 
 	// Storage Hygiene
 	Optimize(ctx context.Context) error

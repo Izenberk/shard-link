@@ -1,5 +1,7 @@
 let data = { nodes: [], links: [] };
 let simulation, svg, container, hudLayer, node, link;
+let bondMode = false;
+let selectedNode = null;
 const width = window.innerWidth;
 const height = window.innerHeight;
 const color = d3.scaleOrdinal(["#5ef3ff", "#00d4ff", "#70a1ff", "#a371f7", "#58a6ff"]);
@@ -45,56 +47,168 @@ function initViz() {
 async function loadGraph() {
     try {
         const response = await fetch('/api/graph');
-        data = await response.json();
-        updateViz();
+        const newData = await response.json();
+        
+        // Change Detection: Only update if node or link count has changed
+        if (newData.nodes.length !== data.nodes.length || newData.links.length !== data.links.length) {
+            console.log("[Sync] Mesh updated detected. Refreshing visualization...");
+            data = newData;
+            updateViz();
+        } else {
+             // If no change, reset visibility just in case user left it highlighted
+             node.style("opacity", 1);
+             link.style("opacity", 0.15);
+        }
     } catch (err) {
         console.error("Failed to load graph:", err);
     }
 }
 
 function updateViz() {
-    // Calculate degrees
+    // 1. Calculate degrees for sizing
+    const newDegree = {};
     data.links.forEach(l => {
-        degree[l.source] = (degree[l.source] || 0) + 1;
-        degree[l.target] = (degree[l.target] || 0) + 1;
+        const sourceID = l.source.id || l.source;
+        const targetID = l.target.id || l.target;
+        newDegree[sourceID] = (newDegree[sourceID] || 0) + 1;
+        newDegree[targetID] = (newDegree[targetID] || 0) + 1;
     });
+    Object.assign(degree, newDegree);
 
-    link = link.data(data.links)
+    // 2. Update Links
+    link = link.data(data.links, d => `${d.source.id || d.source}-${d.target.id || d.target}`)
         .join("line")
-        .attr("class", "link");
-
-    node = node.data(data.nodes)
-        .join("circle")
-        .attr("class", d => {
-            let cls = "node " + d.category;
-            if (d.category === 'core') return cls + " core";
-            if (d.category.includes('doc') || d.category.includes('guideline') || d.category.includes('plan')) cls += " doc";
-            return cls;
-        })
-        .attr("r", d => d.category === 'core' ? 12 : (degree[d.id] || 0) * 2 + 5)
-        .attr("fill", d => {
-            if (d.category === 'core') return "var(--core-color)";
-            if (d.category.includes('doc') || d.category.includes('guideline') || d.category.includes('plan')) return "var(--doc-glow)";
-            return color(d.community);
-        })
+        .attr("class", "link")
         .on("click", (event, d) => {
-            event.stopPropagation();
-            selectNode(d);
-        })
-        .call(d3.drag()
-            .on("start", dragstarted)
-            .on("drag", dragged)
-            .on("end", dragended));
+            if (bondMode) {
+                event.stopPropagation();
+                deleteBond(d.source.id || d.source, d.target.id || d.target);
+            }
+        });
 
+    // 3. Update Nodes
+    node = node.data(data.nodes, d => d.id)
+        .join(
+            enter => enter.append("circle")
+                .attr("class", d => {
+                    let cls = "node " + d.category;
+                    if (d.category === 'core') return cls + " core";
+                    if (d.category.includes('doc') || d.category.includes('guideline') || d.category.includes('plan')) cls += " doc";
+                    return cls;
+                })
+                .attr("r", d => d.category === 'core' ? 12 : (degree[d.id] || 0) * 2 + 5)
+                .attr("fill", d => {
+                    if (d.category === 'core') return "var(--core-color)";
+                    if (d.category.includes('doc') || d.category.includes('guideline') || d.category.includes('plan')) return "var(--doc-glow)";
+                    return color(d.community);
+                })
+                .call(d3.drag()
+                    .on("start", dragstarted)
+                    .on("drag", dragged)
+                    .on("end", dragended))
+                .on("click", (event, d) => {
+                    event.stopPropagation();
+                    selectNode(d);
+                }),
+            update => update
+                .attr("r", d => d.category === 'core' ? 12 : (degree[d.id] || 0) * 2 + 5)
+                .attr("fill", d => {
+                    if (d.category === 'core') return "var(--core-color)";
+                    if (d.category.includes('doc') || d.category.includes('guideline') || d.category.includes('plan')) return "var(--doc-glow)";
+                    return color(d.community);
+                })
+        );
+
+    // 4. Update Simulation
     simulation.nodes(data.nodes);
     simulation.force("link").links(data.links);
-    simulation.alpha(1).restart();
+    
+    // Re-heat simulation to integrate new nodes
+    simulation.alpha(0.3).restart();
 
+    // 5. Update Stats
     document.getElementById('stat-n').innerText = data.nodes.length;
     document.getElementById('stat-e').innerText = data.links.length;
+
+    updateNeighborhoods();
+}
+
+function updateNeighborhoods() {
+    const list = document.getElementById('neighborhoods-list');
+    list.innerHTML = "";
+    
+    const communities = [...new Set(data.nodes.map(n => n.community))].sort();
+    communities.forEach(c => {
+        if (c === undefined) return;
+        const btn = document.createElement("div");
+        btn.className = "hud-btn";
+        btn.style.padding = "4px 8px";
+        btn.style.fontSize = "9px";
+        btn.innerText = "N_" + c;
+        btn.onclick = () => highlightCommunity(c);
+        list.appendChild(btn);
+    });
+}
+
+function highlightCommunity(communityID) {
+    node.style("opacity", d => d.community === communityID ? 1 : 0.1);
+    link.style("opacity", d => {
+        const sComm = d.source.community !== undefined ? d.source.community : d.source;
+        const tComm = d.target.community !== undefined ? d.target.community : d.target;
+        return (sComm === communityID && tComm === communityID) ? 0.3 : 0.05;
+    });
+}
+
+function toggleBondMode() {
+    bondMode = !bondMode;
+    const btn = document.getElementById('bond-mode-btn');
+    btn.innerText = bondMode ? "BOND_MODE: ON" : "BOND_MODE: OFF";
+    btn.style.borderColor = bondMode ? "var(--core-color)" : "var(--panel-border)";
+    
+    if (!bondMode) {
+        selectedNode = null;
+        node.style("stroke", "none");
+    }
+}
+
+async function createBond(fromID, toID) {
+    console.log(`[Mesh] Establishing manual bond: ${fromID} <-> ${toID}`);
+    try {
+        await fetch('/api/bonds', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ from_id: fromID, to_id: toID, weight: 1.0 })
+        });
+        loadGraph();
+    } catch (err) {
+        console.error("Bond creation failed:", err);
+    }
+}
+
+async function deleteBond(fromID, toID) {
+    if (!confirm(`Break bond between ${fromID} and ${toID}?`)) return;
+    try {
+        await fetch(`/api/bonds?from=${fromID}&to=${toID}`, { method: 'DELETE' });
+        loadGraph();
+    } catch (err) {
+        console.error("Bond deletion failed:", err);
+    }
 }
 
 function selectNode(d) {
+    if (bondMode) {
+        if (!selectedNode) {
+            selectedNode = d;
+            node.style("stroke", n => n.id === d.id ? "var(--core-color)" : "none");
+            node.style("stroke-width", n => n.id === d.id ? "4px" : "0");
+        } else if (selectedNode.id !== d.id) {
+            createBond(selectedNode.id, d.id);
+            selectedNode = null;
+            toggleBondMode(); 
+        }
+        return;
+    }
+
     const sidebar = document.getElementById('details');
     sidebar.classList.add('active');
     document.getElementById('det-id').innerText = d.id;
@@ -179,6 +293,9 @@ async function semanticSearch() {
         const response = await fetch(`/api/search?q=${encodeURIComponent(term)}`);
         data = await response.json();
         updateViz();
+        // Reset highlights for new search
+        node.style("opacity", 1);
+        link.style("opacity", 0.15);
     } catch (err) {
         console.error("Semantic search failed:", err);
     }
@@ -202,6 +319,15 @@ function dragended(event) {
 // Initial Setup
 initViz();
 loadGraph();
+
+// Real-Time Sync: Poll for mesh changes every 15 seconds
+setInterval(() => {
+    // Only poll if the sidebar isn't active (to avoid UI jumps during inspection)
+    if (!document.getElementById('details').classList.contains('active') && !bondMode) {
+        console.log("[Sync] Polling Knowledge Mesh for updates...");
+        loadGraph();
+    }
+}, 15000);
 
 // Handle resizing
 window.addEventListener('resize', () => {

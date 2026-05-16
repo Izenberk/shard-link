@@ -69,13 +69,55 @@ func main() {
 	}()
 
 	http.Handle("/", http.FileServer(http.Dir("web/static")))
+	// 2. API Endpoints
 	http.HandleFunc("/api/graph", srv.handleGetGraph)
 	http.HandleFunc("/api/search", srv.handleSearch)
+	http.HandleFunc("/api/bonds", srv.handleBonds)
 
 	log.Printf("Visual Ego Live Dashboard ignited on :8081\n")
 	log.Fatal(http.ListenAndServe(":8081", nil))
-}
+	}
 
+	func (s *Server) handleBonds(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	switch r.Method {
+	case http.MethodPost:
+		var b storage.ShardBond
+		if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+			log.Printf("[API ERROR] Failed to decode bond JSON: %v", err)
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		log.Printf("[API] Manual Bond Request: %s <-> %s (w: %.2f)", b.FromID, b.ToID, b.Weight)
+		if err := s.vessel.SaveBond(ctx, b); err != nil {
+			log.Printf("[API ERROR] Failed to save bond: %v", err)
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+
+	case http.MethodDelete:
+		from := r.URL.Query().Get("from")
+		to := r.URL.Query().Get("to")
+		if from == "" || to == "" {
+			http.Error(w, "from and to IDs required", 400)
+			return
+		}
+		// We need an ArchiveBond or DeleteBond method in Repository
+		// For now, let's use a Cypher query directly if it's VesselGraph
+		query := "MATCH (f:Shard {id: $from})-[r:CONNECTED_TO]-(t:Shard {id: $to}) DELETE r"
+		_, err := s.vessel.ExecuteQuery(ctx, query, map[string]any{"from": from, "to": to})
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+	}
 func (s *Server) handleGetGraph(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	shards, bonds, err := s.vessel.GetGraphData(ctx)

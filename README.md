@@ -21,41 +21,30 @@ Create a `.env` file in the project root:
 ```bash
 # SHARD-LINK Configuration
 PUBLIC_URL=https://hub.izenberk.com
-HUB_API_KEY=shl_live_your_secret_token  # Required for Zero-Proxy Access
-CLOUDFLARE_TUNNEL_TOKEN=your_token_here
-POSTGRES_PASSWORD=your_secure_password
+HUB_API_KEY=shl_live_your_secret_token  
+GEMINI_API_KEY=your_gemini_key
+NEO4J_URL=bolt://localhost:7687
+MESH_LINK_THRESHOLD=0.70
 ```
 
-### 2. Ignite the Hub
+### 2. Ignite the Hub & Dashboard
 ```bash
+# Start the Core Hub
 docker compose up -d --build
-```
-The Hub will be available at `http://localhost:8080/sse` (Internal) and through your Cloudflare URL (External).
 
-### 3. Connect to AI (MCP)
-Add the following to your MCP client configuration (e.g., Gemini CLI, Claude Desktop):
-```json
-{
-  "mcpServers": {
-    "shard-link": {
-      "url": "https://hub.izenberk.com/sse",
-      "headers": {
-        "X-API-Key": "shl_live_your_secret_token"
-      }
-    }
-  }
-}
+# Start the Visual Ego Dashboard (Live View)
+go run cmd/visual_ego/main.go
 ```
+The Hub will be available at `:8080/sse`, and your **Live Knowledge Mesh** is viewable at `http://localhost:8081`.
 
 ## 4. Domain Language & Core Concepts
-- **Shards:** Atomic contextual fragments with 3072-dimensional embeddings (Production Gemini Precision).
-- **Core Shards (Ego Anchors):** Immutable fragments defining user identity. **NEVER EVICTED.**
-- **The Basement:** Tiered archival storage (`shards_archive`) for evicted memories.
-- **Shard Bonds:** A relational "Knowledge Mesh" where shards are linked by cosine similarity (> 0.85).
-- **Dependency Immunity:** Shards strongly bonded to active context are protected from archival.
-- **The Vessel:** A high-performance PostgreSQL/Neo4j repository using 3072-D vectors.
-- **Source Provenance:** Shards maintain their origin (`source_type`, `source_ref`, `confidence`).
-- **Hybrid Retrieval (RRF & MMR):** Searches combine BM25 text match with vector similarity, using Reciprocal Rank Fusion and Maximal Marginal Relevance for context diversity.
+- **Shards:** Atomic contextual fragments with 3072-dimensional embeddings.
+- **Knowledge Mesh:** A relational graph (Neo4j) where shards are nodes and semantic similarities are edges.
+- **Autonomous Memory (Phase 11):** The system proactively links resonant shards on-save and via background synthesis.
+- **Shard Bonds:** Relationships established when cosine similarity exceeds `MESH_LINK_THRESHOLD` (default 0.70).
+- **Core Resonance Protection:** Shards with high similarity to your core profile are autonomously protected from eviction.
+- **Visual Ego:** A real-time, interactive D3.js dashboard for monitoring memory clusters and multi-hop retrieval.
+
 
 ## 5. The Janitor (Size Management)
 The Janitor maintains memory density by "fading" shards to the Basement using a **Composite Survival Score**.

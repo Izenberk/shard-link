@@ -380,6 +380,11 @@ func (v *Vessel) SearchGraph(ctx context.Context, queryVector []byte, limit int)
 	return shards, nil, err
 }
 
+func (v *Vessel) SyncBonds(ctx context.Context, threshold float64) (int, error) {
+	// SQLite doesn't support autonomous graph linking yet
+	return 0, nil
+}
+
 func (v *Vessel) GetGraphData(ctx context.Context) ([]Shard, []ShardBond, error) {
 	shards, err := v.GetAllShards(ctx)
 	if err != nil {

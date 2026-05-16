@@ -26,9 +26,9 @@ type Shard struct {
 
 // ShardBond represents a semantic link between fragments.
 type ShardBond struct {
-	FromID	string
-	ToID	string
-	Weight	float64
+	FromID string  `json:"from_id"`
+	ToID   string  `json:"to_id"`
+	Weight float64 `json:"weight"`
 }
 
 // Embedder defines the contract for turning text into high-dimensional vectors.

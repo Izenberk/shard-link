@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
@@ -36,6 +37,11 @@ func NewVesselGraph(uri, user, pass, dbName string) (*VesselGraph, error) {
 	}
 
 	return v, nil
+}
+
+func (v *VesselGraph) ExecuteQuery(ctx context.Context, query string, params map[string]any) (*neo4j.EagerResult, error) {
+	return neo4j.ExecuteQuery(ctx, v.driver, query, params, neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithDatabase(v.dbName))
 }
 
 func (v *VesselGraph) ensureIndexes(ctx context.Context) error {
@@ -91,7 +97,33 @@ func (v *VesselGraph) SaveShard(ctx context.Context, s Shard) error {
 
 	_, err := neo4j.ExecuteQuery(ctx, v.driver, query, params, neo4j.EagerResultTransformer,
 		neo4j.ExecuteQueryWithDatabase(v.dbName))
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Aha! Moment: Immediate Associative Linking (Phase 11)
+	tStr := os.Getenv("MESH_LINK_THRESHOLD")
+	threshold, err := strconv.ParseFloat(tStr, 64)
+	if err != nil {
+		threshold = 0.70
+	}
+
+	linkQuery := `
+	MATCH (new:Shard {id: $id})
+	MATCH (existing:Shard)
+	WHERE new.id <> existing.id
+	  AND size(existing.embedding) = 3072
+	WITH new, existing, gds.similarity.cosine(new.embedding, existing.embedding) AS sim
+	WHERE sim > $threshold
+	MERGE (new)-[r:CONNECTED_TO]-(existing)
+	SET r.weight = sim
+	`
+	_, _ = neo4j.ExecuteQuery(ctx, v.driver, linkQuery, map[string]any{
+		"id":        s.ID,
+		"threshold": threshold,
+	}, neo4j.EagerResultTransformer, neo4j.ExecuteQueryWithDatabase(v.dbName))
+
+	return nil
 }
 
 func (v *VesselGraph) FindResonant(ctx context.Context, queryVector []byte, limit int) ([]Shard, error) {
@@ -527,6 +559,37 @@ func (v *VesselGraph) SearchGraph(ctx context.Context, queryVector []byte, limit
 		}
 	}
 	return shards, bonds, nil
+}
+
+func (v *VesselGraph) SyncBonds(ctx context.Context, threshold float64) (int, error) {
+	query := `
+	MATCH (s1:Shard)
+	MATCH (s2:Shard)
+	WHERE elementId(s1) < elementId(s2)
+	  AND size(s1.embedding) = 3072 
+	  AND size(s2.embedding) = 3072
+	WITH s1, s2, gds.similarity.cosine(s1.embedding, s2.embedding) AS sim
+	WHERE sim > $threshold
+	MERGE (s1)-[r:CONNECTED_TO]->(s2)
+	SET r.weight = sim
+	RETURN count(r) as bondsCreated
+	`
+	params := map[string]any{
+		"threshold": threshold,
+	}
+
+	result, err := neo4j.ExecuteQuery(ctx, v.driver, query, params, neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithDatabase(v.dbName))
+	if err != nil {
+		return 0, err
+	}
+
+	if len(result.Records) == 0 {
+		return 0, nil
+	}
+
+	count, _ := result.Records[0].Get("bondsCreated")
+	return int(count.(int64)), nil
 }
 
 func (v *VesselGraph) GetGraphData(ctx context.Context) ([]Shard, []ShardBond, error) {

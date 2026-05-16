@@ -10,6 +10,7 @@ import (
 	"github.com/izenberk/shard-link/internal/janitor"
 	"github.com/izenberk/shard-link/internal/mcp"
 	"github.com/izenberk/shard-link/internal/storage"
+	"github.com/izenberk/shard-link/internal/synthesizer"
 )
 
 func main() {
@@ -53,12 +54,15 @@ func main() {
 	}
 	defer v.Close()
 
-	// 3. Summon the Janitor
-	// Adjusted interval from 1m to 15m to reduce resource spikes
+	// 3. Summon the Servants (Janitor & Synthesizer)
 	jan := janitor.NewJanitor(v, 15*time.Minute, 1000)
+	syn := synthesizer.NewSynthesizer(v, 10*time.Minute)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
 	go jan.Run(ctx)
+	go syn.Run(ctx)
 
 	// 4. Configure Intelligence (Phase 10: Standalone Intelligence)
 	var emb storage.Embedder

@@ -74,12 +74,13 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 - [x] **Visual Ego Live**: Converted the graph visualizer into a dynamic, real-time HTTP dashboard with sub-graph search.
 
 ## Phase 11: Autonomous Memory (Relational Synthesis)
-- [ ] **Background Synthesis**: Refactor `auto_link` logic into a background worker.
-- [ ] **On-Save Linking**: Automatically trigger similarity checks when a new shard is saved.
-- [ ] **Clustering Analytics**: Expose Louvain community labels in the Visual Ego dashboard to show "Knowledge Neighborhoods."
-- [ ] **Interactive Edges**: Implement the ability to manually create or break bonds via the Visual Ego UI.
+- [x] **Background Synthesis**: Refactor `auto_link` logic into a background worker.
+- [x] **On-Save Linking**: Automatically trigger similarity checks when a new shard is saved.
+- [x] **Clustering Analytics**: Expose Louvain community labels in the Visual Ego dashboard to show "Knowledge Neighborhoods."
+- [x] **Interactive Edges**: Implement the ability to manually create or break bonds via the Visual Ego UI.
 
 ## Recent Progress (2026-05-16)
+- **Autonomous Synthesis**: Refactored the auto-linker into a background service and on-save trigger.
 - **Visual Ego Live**: Upgraded to a dynamic Go server with live GDS analysis and semantic search.
 - **Relational Integrity**: Established the first semantic bonds between personal identity shards.
 - **Janitor Intelligence**: Refined eviction logic to protect shards resonating with the user's core profile.
