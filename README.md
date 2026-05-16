@@ -48,12 +48,12 @@ Add the following to your MCP client configuration (e.g., Gemini CLI, Claude Des
 ```
 
 ## 4. Domain Language & Core Concepts
-- **Shards:** Atomic contextual fragments with 1536-dimensional embeddings.
+- **Shards:** Atomic contextual fragments with 768-dimensional embeddings (Optimized for Gemini & RAM efficiency).
 - **Core Shards (Ego Anchors):** Immutable fragments defining user identity. **NEVER EVICTED.**
 - **The Basement:** Tiered archival storage (`shards_archive`) for evicted memories.
 - **Shard Bonds:** A relational "Knowledge Mesh" where shards are linked by cosine similarity (> 0.85).
 - **Dependency Immunity:** Shards strongly bonded to active context are protected from archival.
-- **The Vessel:** A high-performance PostgreSQL repository using pgvector for 1536-D math.
+- **The Vessel:** A high-performance PostgreSQL/Neo4j repository using 768-D vectors.
 - **Source Provenance:** Shards maintain their origin (`source_type`, `source_ref`, `confidence`).
 - **Hybrid Retrieval (RRF & MMR):** Searches combine BM25 text match with vector similarity, using Reciprocal Rank Fusion and Maximal Marginal Relevance for context diversity.
 
@@ -87,4 +87,4 @@ Shard-Link implements **Defense in Depth** to ensure security without requiring 
 - **[Core Context (GEMINI.md)](./GEMINI.md):** Foundational mandates and domain logic for AI agents.
 
 ---
-*Status: PHASE 9 COMPLETE (Memory Integrity Active) | Date: 2026-05-15*
+*Status: PHASE 10 COMPLETE (Standalone Intelligence Active) | Date: 2026-05-16*
