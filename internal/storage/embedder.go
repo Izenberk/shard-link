@@ -81,7 +81,7 @@ func (l *TinyLocalEmbedder) Embed(ctx context.Context, text string) ([]float32, 
 }
 
 func (l *TinyLocalEmbedder) Dimension() int {
-	return 384
+	return 768
 }
 
 // --- HELPERS ---
