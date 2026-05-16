@@ -28,11 +28,11 @@ func NewMCPServer(v storage.Repository, apiKey string, e storage.Embedder) *MCPS
 		server.WithResourceCapabilities(true, true),
 		server.WithToolCapabilities(true),
 		server.WithPromptCapabilities(true),
-	)
+)
 
-	mcpSrv := &MCPServer{
-		vessel:	 v,
-		mcp:		 s,
+mcpSrv := &MCPServer{
+	vessel:	 v,
+	mcp:		 s,
 		apiKey:  apiKey,
 		embedder: e,
 	}
@@ -234,7 +234,7 @@ func (s *MCPServer) handleSearchText(ctx context.Context, request mcp.CallToolRe
 }
 
 func (s *MCPServer) RegisterPrompts() {
-	shardPrompt := mcp.NewPrompt("shard",
+	shardPrompt := mcp.NewPrompt("mesh_search",
 		mcp.WithPromptDescription("Global search across Shard-Link memory"),
 		mcp.WithArgument("query", mcp.ArgumentDescription("Keyword or topic to search for"), mcp.RequiredArgument()),
 	)

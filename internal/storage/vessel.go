@@ -18,8 +18,8 @@ var schema string
 // Add the Pool
 var vectorPool = sync.Pool{
 	New: func() any {
-		// We pre-allocate 1536 slots (the standard dimension for OpenAI/Gemini)
-		return make([]float32, 1536)
+		// We pre-allocate 768 slots (the new optimized standard for Phase 10)
+		return make([]float32, 768)
 	},
 }
 
@@ -39,7 +39,7 @@ func NewVessel(path string) (*Vessel, error) {
 
 	// 1. Register vec_version
 	err = conn.CreateFunction("vec_version", 0, sqlite3.DETERMINISTIC, func(ctx sqlite3.Context, arg ...sqlite3.Value) {
-		ctx.ResultText("shard-link-go-v0.1.0")
+		ctx.ResultText("shard-link-go-v0.2.0")
 	})
 	if err != nil {
 		conn.Close()
@@ -52,11 +52,11 @@ func NewVessel(path string) (*Vessel, error) {
 		v2 := decodeVector(arg[1].RawBlob())
 
 		defer func() {
-			if v1 != nil && cap(v1) == 1536 {
-				vectorPool.Put(v1[:1536])
+			if v1 != nil && cap(v1) == 768 {
+				vectorPool.Put(v1[:768])
 			}
-			if v2 != nil && cap(v2) == 1536 {
-				vectorPool.Put(v2[:1536])
+			if v2 != nil && cap(v2) == 768 {
+				vectorPool.Put(v2[:768])
 			}
 		}()
 
@@ -84,13 +84,16 @@ func NewVessel(path string) (*Vessel, error) {
 // SaveShard persists a fragment or updates it if the ID already exists.
 func (v *Vessel) SaveShard(ctx context.Context, s Shard) error {
 	const query = `
-		INSERT INTO shards (id, category, content, vector, metadata)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO shards (id, category, content, vector, metadata, source_type, source_ref, confidence)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			category=excluded.category,
 			content=excluded.content,
 			vector=excluded.vector,
 			metadata=excluded.metadata,
+			source_type=excluded.source_type,
+			source_ref=excluded.source_ref,
+			confidence=excluded.confidence,
 			last_used=CURRENT_TIMESTAMP;
 	`
 	stmt, _, err := v.conn.Prepare(query)
@@ -104,6 +107,9 @@ func (v *Vessel) SaveShard(ctx context.Context, s Shard) error {
 	stmt.BindText(3, s.Content)
 	stmt.BindBlob(4, s.Vector)
 	stmt.BindBlob(5, s.Metadata)
+	stmt.BindText(6, s.SourceType)
+	stmt.BindText(7, s.SourceRef)
+	stmt.BindFloat(8, s.Confidence)
 
 	if err := stmt.Exec(); err != nil {
 		return fmt.Errorf("exec save: %w", err)
@@ -114,7 +120,7 @@ func (v *Vessel) SaveShard(ctx context.Context, s Shard) error {
 // FindResonant searches for shards closest to the query vector.
 func (v *Vessel) FindResonant(ctx context.Context, queryVector []byte, limit int) ([]Shard, error) {
 	const query = `
-		SELECT id, category, content, vector, metadata, last_used, created_at
+		SELECT id, category, content, vector, metadata, source_type, source_ref, confidence, last_used, created_at
 		FROM shards
 		ORDER BY vec_distance_cosine(vector, ?) ASC
 		LIMIT ?;
@@ -131,11 +137,14 @@ func (v *Vessel) FindResonant(ctx context.Context, queryVector []byte, limit int
 	var shards []Shard
 	for stmt.Step() {
 		shards = append(shards, Shard{
-			ID:       stmt.ColumnText(0),
-			Category: stmt.ColumnText(1),
-			Content:  stmt.ColumnText(2),
-			Vector:   stmt.ColumnBlob(3, nil),
-			Metadata: stmt.ColumnBlob(4, nil),
+			ID:         stmt.ColumnText(0),
+			Category:   stmt.ColumnText(1),
+			Content:    stmt.ColumnText(2),
+			Vector:     stmt.ColumnBlob(3, nil),
+			Metadata:   stmt.ColumnBlob(4, nil),
+			SourceType: stmt.ColumnText(5),
+			SourceRef:  stmt.ColumnText(6),
+			Confidence: stmt.ColumnFloat(7),
 		})
 	}
 
@@ -148,7 +157,7 @@ func (v *Vessel) FindResonant(ctx context.Context, queryVector []byte, limit int
 
 func (v *Vessel) FindText(ctx context.Context, query string, limit int) ([]Shard, error) {
 	const sqlQuery = `
-		SELECT id, category, content, vector, metadata, last_used, created_at
+		SELECT id, category, content, vector, metadata, source_type, source_ref, confidence, last_used, created_at
 		FROM shards
 		WHERE content LIKE ?
 		ORDER BY last_used DESC
@@ -166,11 +175,14 @@ func (v *Vessel) FindText(ctx context.Context, query string, limit int) ([]Shard
 	var shards []Shard
 	for stmt.Step() {
 		shards = append(shards, Shard{
-			ID:       stmt.ColumnText(0),
-			Category: stmt.ColumnText(1),
-			Content:  stmt.ColumnText(2),
-			Vector:   stmt.ColumnBlob(3, nil),
-			Metadata: stmt.ColumnBlob(4, nil),
+			ID:         stmt.ColumnText(0),
+			Category:   stmt.ColumnText(1),
+			Content:    stmt.ColumnText(2),
+			Vector:     stmt.ColumnBlob(3, nil),
+			Metadata:   stmt.ColumnBlob(4, nil),
+			SourceType: stmt.ColumnText(5),
+			SourceRef:  stmt.ColumnText(6),
+			Confidence: stmt.ColumnFloat(7),
 		})
 	}
 
@@ -183,7 +195,6 @@ func (v *Vessel) FindText(ctx context.Context, query string, limit int) ([]Shard
 
 // FindHybrid performs Reciprocal Rank Fusion (RRF) on vector and text search results.
 func (v *Vessel) FindHybrid(ctx context.Context, textQuery string, queryVector []byte, limit int) ([]Shard, error) {
-	// 1. Fetch expanded candidate lists (limit * 2 is a common heuristic for RRF)
 	candidateLimit := limit * 2
 
 	vectorResults, err := v.FindResonant(ctx, queryVector, candidateLimit)
@@ -196,11 +207,7 @@ func (v *Vessel) FindHybrid(ctx context.Context, textQuery string, queryVector [
 		return nil, fmt.Errorf("text search failed in hybrid: %w", err)
 	}
 
-	// 2. Fuse the results using our RRF utility
-	// k=60.0 is the standard smoothing constant
-	fusedResults := ReciprocalRankFusion(limit, 60.0, vectorResults, textResults)
-
-	return fusedResults, nil
+	return ReciprocalRankFusion(limit, 60.0, vectorResults, textResults), nil
 }
 
 func (v *Vessel) GetCoreShards(ctx context.Context) ([]Shard, error) {
@@ -223,8 +230,8 @@ func (v *Vessel) GetCoreShards(ctx context.Context) ([]Shard, error) {
 
 func (v *Vessel) ArchiveShard(ctx context.Context, id string) error {
 	const query = `
-		INSERT OR REPLACE INTO shards_archive (id, category, content, vector, metadata)
-		SELECT id, category, content, vector, metadata FROM shards WHERE id = ?;
+		INSERT OR REPLACE INTO shards_archive (id, category, content, vector, metadata, source_type, source_ref, confidence)
+		SELECT id, category, content, vector, metadata, source_type, source_ref, confidence FROM shards WHERE id = ?;
 	`
 	stmt, _, err := v.conn.Prepare(query)
 	if err != nil {
@@ -241,7 +248,7 @@ func (v *Vessel) ArchiveShard(ctx context.Context, id string) error {
 }
 
 func (v *Vessel) GetAllShards(ctx context.Context) ([]Shard, error) {
-	const query = `SELECT id, category, content, vector, metadata, last_used, created_at FROM shards`
+	const query = `SELECT id, category, content, vector, metadata, source_type, source_ref, confidence, last_used, created_at FROM shards`
 	stmt, _, err := v.conn.Prepare(query)
 	if err != nil {
 		return nil, err
@@ -250,17 +257,20 @@ func (v *Vessel) GetAllShards(ctx context.Context) ([]Shard, error) {
 
 	var shards []Shard
 	for stmt.Step() {
-		lu, _ := time.Parse(time.RFC3339, stmt.ColumnText(5))
-		ca, _ := time.Parse(time.RFC3339, stmt.ColumnText(6))
+		lu, _ := time.Parse(time.RFC3339, stmt.ColumnText(8))
+		ca, _ := time.Parse(time.RFC3339, stmt.ColumnText(9))
 
 		shards = append(shards, Shard{
-			ID:        stmt.ColumnText(0),
-			Category:  stmt.ColumnText(1),
-			Content:   stmt.ColumnText(2),
-			Vector:    stmt.ColumnBlob(3, nil),
-			Metadata:  stmt.ColumnBlob(4, nil),
-			LastUsed:  lu,
-			CreatedAt: ca,
+			ID:         stmt.ColumnText(0),
+			Category:   stmt.ColumnText(1),
+			Content:    stmt.ColumnText(2),
+			Vector:     stmt.ColumnBlob(3, nil),
+			Metadata:   stmt.ColumnBlob(4, nil),
+			SourceType: stmt.ColumnText(5),
+			SourceRef:  stmt.ColumnText(6),
+			Confidence: stmt.ColumnFloat(7),
+			LastUsed:   lu,
+			CreatedAt:  ca,
 		})
 	}
 	return shards, stmt.Err()
@@ -351,7 +361,7 @@ func (v *Vessel) GetAllBonds(ctx context.Context) ([]ShardBond, error) {
 }
 
 func (v *Vessel) SearchGraph(ctx context.Context, queryVector []byte, limit int) ([]Shard, error) {
-	// SQLite doesn't support complex graph traversal easily, so we fallback to vector search
+	// SQLite fallback to vector search
 	return v.FindResonant(ctx, queryVector, limit)
 }
 
@@ -368,20 +378,16 @@ func (v *Vessel) GetGraphData(ctx context.Context) ([]Shard, []ShardBond, error)
 }
 
 func (v *Vessel) CalculateCommunities(ctx context.Context) (int, error) {
-	// SQLite doesn't support Louvain/Leiden natively.
-	// For now, we return 0 communities.
 	return 0, nil
 }
 
 // Optimize runs maintenance tasks to reclaim space and update statistics
 func (v *Vessel) Optimize(ctx context.Context) error {
-	// PRAGMA optimize runs query planner analytics
 	err := v.conn.Exec("PRAGMA optimize;")
 	if err != nil {
 		return fmt.Errorf("pragma optimize failed: %w", err)
 	}
 
-	// VACUUM reclaims deleted space (useful after Janitor eviction)
 	err = v.conn.Exec("VACUUM;")
 	if err != nil {
 		return fmt.Errorf("vacuum failed: %w", err)
@@ -402,7 +408,7 @@ func decodeVector(b []byte) []float32 {
 	}
 	limit := len(b) / 4
 	var v []float32
-	if limit <= 1536 {
+	if limit <= 768 {
 		v = vectorPool.Get().([]float32)
 		v = v[:limit]
 	} else {
