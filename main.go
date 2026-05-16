@@ -72,7 +72,9 @@ func main() {
 		}
 
 		model := os.Getenv("EMBEDDING_MODEL")
-		if model == "" { model = "text-embedding-004" }
+		if model == "" {
+			model = "embedding-001"
+		}
 		
 		geminiEmb, err := storage.NewGeminiEmbedder(ctx, geminiKey, model)
 		if err != nil {
