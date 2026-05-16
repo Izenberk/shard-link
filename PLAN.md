@@ -50,7 +50,7 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 - [x] **Infrastructure Swap**: Added Neo4j to `docker-compose.yml` with APOC and Graph Data Science (GDS) support.
 - [x] **Graph Repository**: Implemented `VesselGraph` in Go, mapping Shards to Nodes and Bonds to `CONNECTED_TO` edges.
 - [x] **Data Integrity & Sync**: Developed `cmd/repair_vec` to fix zeroed vectors and `cmd/migrate` for high-fidelity transfer to the Mesh.
-
+    
 - [x] **Auto-Linker**: Implemented `cmd/auto_link` to automatically establish semantic bonds using `gds.similarity.cosine`.
 - [x] **Native Centrality**: Refactored the Janitor to use **PageRank** via GDS for intelligent, relational-aware eviction.
 - [x] **Multi-Hop Retrieval**: Implement a `search_graph` MCP tool to enable path-traversal (e.g., "Find the decision chain for feature X").
@@ -64,9 +64,16 @@ This document serves as the step-by-step checklist for the Shard-Link "Memory Hu
 - [x] **Storage Hygiene**: Implement HNSW tuning, partial indexes, and automated VACUUM/REINDEX crons.
 
 ## Phase 10: Standalone Intelligence (Local Inference)
+- [x] **Direct Access**: Implemented MCP Prompt for direct slash-command retrieval (`/shard`).
+- [x] **Stability Patch**: Optimized SSE KeepAlive (15s) and Neo4j heap sizing (2GB).
 - [ ] Integrate a **Local Embedding Tool** (e.g., Ollama or a Go-native wrapper).
 - [ ] Implement an `Embedder` interface to swap between local and cloud providers.
 - [ ] **Dimension Right-sizing**: Transition to 384-D or 512-D embeddings to optimize RAM and speed.
 
+## Recent Progress (2026-05-16)
+- **MCP Stability Improvements**: Adjusted Janitor frequency to 15m, tuned Neo4j heap/pagecache, and configured SSE KeepAlive to 15s.
+- **New Feature**: Added `/shard` slash command via MCP Prompts for manual, global memory search.
+- **Knowledge Mesh Audit**: Ran `cmd/check_mesh`. All vectors are valid. 4 orphaned shards identified (`doc-mcp`, `migration-success-final-2026-05-10`, `token_efficiency_v1`, `session-summary-2026-05-13-phase8-init`).
+
 ---
-*Status: PHASE 9 COMPLETE (Hygiene & MMR Active) | Phase 10 IN PROGRESS | Date: 2026-05-15*
+*Status: PHASE 9 COMPLETE | Phase 10 IN PROGRESS (Audit Clean-up) | Date: 2026-05-16*

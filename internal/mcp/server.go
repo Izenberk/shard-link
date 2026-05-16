@@ -26,6 +26,7 @@ func NewMCPServer(v storage.Repository, apiKey string) *MCPServer {
 		"v0.1.0",
 		server.WithResourceCapabilities(true, true),
 		server.WithToolCapabilities(true),
+		server.WithPromptCapabilities(true),
 	)
 
 	mcpSrv := &MCPServer{
@@ -34,9 +35,10 @@ func NewMCPServer(v storage.Repository, apiKey string) *MCPServer {
 		apiKey: apiKey,
 	}
 
-	// 2. Register tools and resources BEFORE return
+	// 2. Register tools, resources, and prompts BEFORE return
 	mcpSrv.RegisterTools()
 	mcpSrv.RegisterResources()
+	mcpSrv.RegisterPrompts()
 
 	return mcpSrv
 }
@@ -121,7 +123,6 @@ func (s *MCPServer) handleSearchGraph(ctx context.Context, request mcp.CallToolR
 	return mcp.NewToolResultText(response), nil
 }
 
-
 func (s *MCPServer) RegisterResources() {
 	// 1. Define the resource
 	res := mcp.NewResource("shard-link://core",
@@ -205,40 +206,54 @@ func (s *MCPServer) handleSearchText(ctx context.Context, request mcp.CallToolRe
 	return mcp.NewToolResultText(response), nil
 }
 
+func (s *MCPServer) RegisterPrompts() {
+	shardPrompt := mcp.NewPrompt("shard",
+		mcp.WithPromptDescription("Global search across Shard-Link memory"),
+		mcp.WithArgument("query", mcp.ArgumentDescription("Keyword or topic to search for"), mcp.RequiredArgument()),
+	)
+	s.mcp.AddPrompt(shardPrompt, s.handleShardPrompt)
+}
+
+func (s *MCPServer) handleShardPrompt(ctx context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+	query := request.Params.Arguments["query"]
+	
+	// Perform a text search across the vessel
+	shards, err := s.vessel.FindText(ctx, query, 5)
+	if err != nil {
+		return nil, err
+	}
+
+	var body string
+	if len(shards) == 0 {
+		body = fmt.Sprintf("No memory shards found for query: %s", query)
+	} else {
+		body = "Relevant Memory Shards:\n---\n"
+		for _, shard := range shards {
+			body += fmt.Sprintf("[%s] (%s): %s\n---\n", shard.ID, shard.Category, shard.Content)
+		}
+	}
+
+	return mcp.NewGetPromptResult(
+		"Shard-Link Context Retrieval",
+		[]mcp.PromptMessage{
+			mcp.NewPromptMessage(mcp.RoleUser, mcp.NewTextContent(body)),
+		},
+	), nil
+}
+
 // StartSSE launches the production-grade HTTP bridge with API Key protection.
 func (s *MCPServer) StartSSE(port int, baseURL string) error {
 	// 1. Wrap the MCP server logic in an SSE transport
-	sseServer := server.NewSSEServer(s.mcp, server.WithBaseURL(baseURL))
+	sseServer := server.NewSSEServer(s.mcp,
+		server.WithBaseURL(baseURL),
+		server.WithKeepAliveInterval(15*time.Second),
+	)
 
 	// 2. Setup standard HTTP routing
 	mux := http.NewServeMux()
 
-	// 3. SSE Handler with Auth & Heartbeat (Cloudflare stable)
+	// 3. SSE Handler with Auth
 	mux.Handle("/sse", s.withAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		f, ok := w.(http.Flusher)
-		if !ok {
-			sseServer.SSEHandler().ServeHTTP(w, r)
-			return
-		}
-
-		ctx, cancel := context.WithCancel(r.Context())
-		defer cancel()
-
-		go func() {
-			ticker := time.NewTicker(15 * time.Second) // Reduced for Cloudflare stability
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					// Send an SSE comment as a heartbeat (ignored by client but keeps connection alive)
-					fmt.Fprintf(w, ": heartbeat\n\n")
-					f.Flush()
-				}
-			}
-		}()
-
 		sseServer.SSEHandler().ServeHTTP(w, r)
 	})))
 

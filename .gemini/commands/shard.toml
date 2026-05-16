@@ -1,0 +1,7 @@
+description = "Global memory search via Shard-Link (MCP)"
+prompt = """
+You MUST use the 'mcp_shard-link_search_text' tool (and 'mcp_shard-link_search_memory' if needed) to find shards related to '{{args}}'. 
+DO NOT use direct 'sqlite3' shell commands. 
+The Neo4j Knowledge Mesh is the primary source of truth for this project. 
+Summarize the results from the MCP tool call.
+"""

@@ -38,8 +38,8 @@ func NewVesselGraph(uri, user, pass, dbName string) (*VesselGraph, error) {
 }
 
 func (v *VesselGraph) ensureIndexes(ctx context.Context) error {
-	// Create Vector Index for 1536-D embeddings
-	query := `
+	// 1. Vector Index for 1536-D embeddings
+	vectorQuery := `
 	CREATE VECTOR INDEX shard_embeddings IF NOT EXISTS
 	FOR (s:Shard) ON (s.embedding)
 	OPTIONS {indexConfig: {
@@ -47,7 +47,17 @@ func (v *VesselGraph) ensureIndexes(ctx context.Context) error {
 		` + "`vector.similarity_function`" + `: 'cosine'
 	}}`
 
-	_, err := neo4j.ExecuteQuery(ctx, v.driver, query, nil, neo4j.EagerResultTransformer,
+	if _, err := neo4j.ExecuteQuery(ctx, v.driver, vectorQuery, nil, neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithDatabase(v.dbName)); err != nil {
+		return err
+	}
+
+	// 2. Full-Text Index for Keyword Retrieval (Global Scale)
+	ftQuery := `
+	CREATE FULLTEXT INDEX shard_content_ft IF NOT EXISTS
+	FOR (s:Shard) ON EACH [s.content]
+	`
+	_, err := neo4j.ExecuteQuery(ctx, v.driver, ftQuery, nil, neo4j.EagerResultTransformer,
 		neo4j.ExecuteQueryWithDatabase(v.dbName))
 	return err
 }
@@ -375,11 +385,12 @@ func (v *VesselGraph) GetAllShards(ctx context.Context) ([]Shard, error) {
 }
 
 func (v *VesselGraph) FindText(ctx context.Context, query string, limit int) ([]Shard, error) {
+	// Super Senior Update: Use Full-Text Index instead of rigid CONTAINS
+	// This handles tokenization, case-insensitivity, and ranking.
 	cypher := `
-	MATCH (s:Shard)
-	WHERE s.content CONTAINS $query
-	RETURN s
-	ORDER BY s.last_used DESC
+	CALL db.index.fulltext.queryNodes('shard_content_ft', $query)
+	YIELD node, score
+	RETURN node
 	LIMIT $limit
 	`
 	params := map[string]any{
@@ -394,7 +405,7 @@ func (v *VesselGraph) FindText(ctx context.Context, query string, limit int) ([]
 
 	var shards []Shard
 	for _, record := range result.Records {
-		node, _ := record.Get("s")
+		node, _ := record.Get("node")
 		shards = append(shards, nodeToShard(node.(neo4j.Node)))
 	}
 	return shards, nil

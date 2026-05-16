@@ -54,7 +54,8 @@ func main() {
 	defer v.Close()
 
 	// 3. Summon the Janitor
-	jan := janitor.NewJanitor(v, 1*time.Minute, 1000)
+	// Adjusted interval from 1m to 15m to reduce resource spikes
+	jan := janitor.NewJanitor(v, 15*time.Minute, 1000)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
