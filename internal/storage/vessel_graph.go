@@ -266,7 +266,13 @@ func nodeToShard(node neo4j.Node) Shard {
 	// Phase 9: Source Provenance
 	srcType, _ := props["source_type"].(string)
 	srcRef, _ := props["source_ref"].(string)
-	conf, _ := props["confidence"].(float64)
+	
+	var conf float64
+	if c, ok := props["confidence"].(float64); ok {
+		conf = c
+	} else if c, ok := props["confidence"].(int64); ok {
+		conf = float64(c)
+	}
 
 	luStr, _ := props["last_used"].(string)
 	caStr, _ := props["created_at"].(string)
@@ -275,14 +281,25 @@ func nodeToShard(node neo4j.Node) Shard {
 	ca, _ := time.Parse(time.RFC3339, caStr)
 
 	// Extract Community ID
-	commID, _ := props["community"].(int64)
+	var commID int64
+	if c, ok := props["community"].(int64); ok {
+		commID = c
+	} else if c, ok := props["community"].(float64); ok {
+		commID = int64(c)
+	}
 
 	// Convert []float32 (Neo4j) back to []byte (Shard-Link)
 	var vec []byte
 	if rawVec, ok := props["embedding"].([]any); ok {
 		vec = make([]byte, len(rawVec)*4)
 		for i, v := range rawVec {
-			f := float32(v.(float64))
+			var f float32
+			switch val := v.(type) {
+			case float64:
+				f = float32(val)
+			case int64:
+				f = float32(val)
+			}
 			putFloat32(vec[i*4:], f)
 		}
 	}

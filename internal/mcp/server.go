@@ -28,12 +28,12 @@ func NewMCPServer(v storage.Repository, apiKey string, e storage.Embedder) *MCPS
 		server.WithResourceCapabilities(true, true),
 		server.WithToolCapabilities(true),
 		server.WithPromptCapabilities(true),
-)
+	)
 
-mcpSrv := &MCPServer{
-	vessel:	 v,
-	mcp:		 s,
-		apiKey:  apiKey,
+	mcpSrv := &MCPServer{
+		vessel:	 v,
+		mcp:		 s,
+	apiKey:  apiKey,
 		embedder: e,
 	}
 
