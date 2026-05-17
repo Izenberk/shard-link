@@ -68,5 +68,13 @@ This document tracks the resolution of architectural bottlenecks and outlines fu
 - Unified search and topology stats into a single **Knowledge Sidebar**.
 - Integrated a dedicated, scrollable **Activity Terminal** in the bottom-left.
 
+## ✅ Resolved: MCP Stability & Startup Resilience (2026-05-17)
+**The Problem:** The Hub service often crashed or failed to initialize if Neo4j was still in its slow plugin installation phase (especially after a system restart). Furthermore, Cloudflare tunnels frequently timed out long-lived SSE connections due to idle activity.
+**The Solution:** Implemented a multi-layered stability patch.
+- **Hub Ignition Retry Loop:** Added a 15-attempt (150s) retry loop for database connections in `main.go`.
+- **Healthcheck Orchestration:** Updated `docker-compose.yml` to wait for a `service_healthy` signal from Neo4j before starting the Hub.
+- **Aggressive Heartbeats:** Reduced the MCP SSE keep-alive interval from 15s to 10s to maintain stable tunnel connectivity.
+- **Non-Blocking Synthesis:** Refactored the `Synthesizer` to execute intensive Louvain community refreshes asynchronously, preventing main-loop blocking and session timeouts.
+
 ---
 *Last Updated: 2026-05-17*

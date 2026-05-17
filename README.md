@@ -20,7 +20,7 @@ Shard-Link utilizes a multi-vessel storage strategy to optimize for intelligence
 Create a `.env` file from `.env.example`:
 ```bash
 # SHARD-LINK Configuration
-HUB_API_KEY=shl_live_your_secret_token  
+HUB_API_KEY=shl_live_your_secret_token
 GEMINI_API_KEY=your_gemini_key
 
 # Mesh Configuration
@@ -91,7 +91,7 @@ This is the default mode. It runs the entire stack—Neo4j, PostgreSQL, and the 
 This mode exposes your Hub to the internet via an encrypted **Cloudflare Tunnel**, allowing remote AI agents to connect to your Knowledge Mesh from anywhere in the world.
 - **Connectivity:** Accessible via a custom domain (e.g., `hub.izenberk.com`).
 - **Mechanism:** Uses an outbound-only connection to Cloudflare's edge; **no router port forwarding is required**.
-- **Prerequisites:** 
+- **Prerequisites:**
   - A Cloudflare-managed domain.
   - A `CLOUDFLARE_TUNNEL_TOKEN` (generated in the Cloudflare Zero Trust dashboard) added to your `.env`.
 - **Command:** `docker compose --profile online up -d`
@@ -108,6 +108,12 @@ Shard-Link implements **Defense in Depth** to ensure security without requiring 
 - **[Implementation Roadmap (PLAN.md)](./PLAN.md):** Track the phase-by-phase progress of the Hub.
 - **[Improvements Track (IMPROVEMENT.md)](./IMPROVEMENT.md):** Architectural bottlenecks and performance optimization logs.
 - **[Core Context (GEMINI.md)](./GEMINI.md):** Foundational mandates and domain logic for AI agents.
+
+## 10. High-Resiliency Design
+Shard-Link is built for production-grade stability across disparate environments:
+- **Startup Resilience:** The Hub implements a 150-second "Ignition Loop," allowing it to wait for the Knowledge Mesh to finish intensive plugin installations (APOC/GDS) after a system reboot.
+- **Tunnel Stability:** MCP connections are protected by aggressive 10-second SSE heartbeats, preventing Cloudflare and other edge proxies from dropping idle sessions.
+- **Asynchronous Thinking:** Intensive graph operations (Louvain communities) are offloaded to background goroutines, ensuring the semantic search tools remain responsive under load.
 
 ---
 *Status: PHASE 11 COMPLETE (Autonomous Memory + Enhanced Observability) | Date: 2026-05-17*
