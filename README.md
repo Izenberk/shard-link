@@ -5,11 +5,13 @@ Shard-Link is a high-performance "Memory Hub" designed to provide long-term memo
 ## 1. Project Objective
 Maintain a persistent "Remembrance" across AI sessions through high-performance Go-based context routing, ensuring "Your Shards, Your Vessel" (Privacy & Safety).
 
-## 2. Technical Stack
+## 2. Technical Stack: The Triple-Engine Architecture
+Shard-Link utilizes a multi-vessel storage strategy to optimize for intelligence, stability, and scale:
+
+- **Neo4j + GDS (The Knowledge Mesh):** Primary engine for relational reasoning, centrality analysis (PageRank), and community clustering.
+- **SQLite (The Seed Memory):** Local-first anchor for Core Identity shards and the persistent activity ledger.
+- **PostgreSQL + pgvector (The Archival Vessel):** High-volume relational scaler for deep memory archiving and SIMD-accelerated search.
 - **Backend:** Go (Golang) 1.26+ (Strict SOLID standards).
-- **Knowledge Mesh:** Neo4j 5.x + GDS + APOC (The "Living Memory").
-- **Identity Storage:** SQLite (Local-first "Seed Memory").
-- **Relational Scaling:** PostgreSQL + `pgvector` (High-volume archival).
 - **Protocol:** MCP (Model Context Protocol) over SSE/JSON-RPC.
 
 ## 3. Quick Start (Ready for Clone & Run)

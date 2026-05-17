@@ -32,6 +32,12 @@ The "Living Memory" is hosted in Neo4j. By utilizing the **Graph Data Science (G
 ### 3.3 The Protocol (MCP)
 Shard-Link exposes its capabilities via the **Model Context Protocol (MCP)**. This allows any AI agent to interact with its long-term memory as a set of standardized tools (`search_graph`, `search_memory`, `save_memory`), making the integration seamless and cross-platform.
 
+### 3.4 Triple-Engine Strategy
+Shard-Link utilizes a multi-database approach to balance intelligence, stability, and scale:
+- **Neo4j (Knowledge Mesh):** The "Living Memory" for relational reasoning, centrality analysis, and community detection.
+- **SQLite (Seed Memory):** The "Identity Anchor" for local-first stability, storing core user profile shards and the persistent activity ledger.
+- **PostgreSQL (Archival Vessel):** The "Relational Scaler" using `pgvector` for high-volume storage and SIMD-accelerated archival search.
+
 ## 4. Autonomous Memory Management
 A finite context window requires a sophisticated eviction strategy. Shard-Link employs **The Janitor**, a background process that utilizes a mathematical survival model.
 
