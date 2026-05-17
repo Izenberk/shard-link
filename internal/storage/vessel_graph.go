@@ -328,12 +328,19 @@ func nodeToShard(node neo4j.Node) Shard {
 	lu, _ := time.Parse(time.RFC3339, luStr)
 	ca, _ := time.Parse(time.RFC3339, caStr)
 
-	// Extract Community ID
+	// Extract Community ID and PageRank
 	var commID int64
 	if c, ok := props["community"].(int64); ok {
 		commID = c
 	} else if c, ok := props["community"].(float64); ok {
 		commID = int64(c)
+	}
+
+	var rank float64
+	if r, ok := props["pagerank"].(float64); ok {
+		rank = r
+	} else if r, ok := props["pagerank"].(int64); ok {
+		rank = float64(r)
 	}
 
 	// Convert []float32 (Neo4j) back to []byte (Shard-Link)
@@ -362,6 +369,7 @@ func nodeToShard(node neo4j.Node) Shard {
 		SourceRef:   srcRef,
 		Confidence:  conf,
 		CommunityID: commID,
+		PageRank:    rank,
 		LastUsed:    lu,
 		CreatedAt:   ca,
 	}

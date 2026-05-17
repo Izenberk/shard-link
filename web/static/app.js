@@ -95,9 +95,9 @@ function updateViz() {
 
     link = link.data(data.links, d => `${d.source.id || d.source}-${d.target.id || d.target}`)
         .join("line")
-        .attr("class", "link")
-        .style("stroke-width", d => Math.pow(d.weight, 5) * 5 + 0.5 + "px")
-        .style("stroke-opacity", 0.1)
+        .attr("class", "link active")
+        .style("stroke-width", d => Math.pow(d.weight, 2) * 2 + 1 + "px")
+        .style("stroke-opacity", d => Math.max(0.1, d.weight * 0.35))
         .on("click", (event, d) => {
             if (bondMode) {
                 event.stopPropagation();
@@ -147,11 +147,13 @@ function selectNode(d) {
     
     const sidebar = document.getElementById('details');
     sidebar.classList.add('active');
-    document.getElementById('det-id').innerText = d.id;
+    document.getElementById('det-id').innerText = d.id || "UNKNOWN";
     document.getElementById('det-density').innerText = (degree[d.id] || 0) + " BONDS";
-    document.getElementById('det-time').innerText = d.created_at;
-    document.getElementById('det-comm').innerText = "N_" + d.community;
-    document.getElementById('det-content').innerText = d.content;
+    document.getElementById('det-rank').innerText = (d.pagerank || 0).toFixed(4);
+    document.getElementById('det-survival').innerText = (d.survival || 0).toFixed(2);
+    document.getElementById('det-time').innerText = d.created_at || "--";
+    document.getElementById('det-comm').innerText = d.community !== undefined ? "N_" + d.community : "N_NONE";
+    document.getElementById('det-content').innerText = d.content || "NO_CONTENT";
     drawHUD(d);
 }
 
@@ -253,6 +255,18 @@ function resetView() {
 }
 function zoomIn() { svg.transition().duration(300).call(zoom.scaleBy, 1.3); }
 function zoomOut() { svg.transition().duration(300).call(zoom.scaleBy, 0.7); }
+
+function toggleGlossary() {
+    const glossary = document.getElementById('mesh-glossary');
+    glossary.classList.toggle('active');
+    
+    const btn = document.getElementById('glossary-btn');
+    if (glossary.classList.contains('active')) {
+        btn.innerText = 'HIDE_GLOSSARY';
+    } else {
+        btn.innerText = 'SHOW_GLOSSARY';
+    }
+}
 
 async function semanticSearch() {
     const term = document.getElementById('search').value;

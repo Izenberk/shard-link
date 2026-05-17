@@ -51,10 +51,10 @@ The Janitor maintains memory density by "fading" shards to the Basement using a 
 
 ### Survival Formula:
 Instead of rigid recency filtering, Shard-Link uses a weighted importance score:
-`Score = (Links * Centrality) / (Time^Decay)`
+`Score = (NeuralDensity * RelationalCentrality) / (Time^Decay)`
 
 1. **Category:** If `category == 'core'`, skip.
-2. **Immunity:** If shard is strongly bonded (weight > 0.85), skip.
+2. **Neural Density:** If shard is strongly bonded (weight > 0.85 or high bond count), it receives a survival boost.
 3. **Resonance Decay:** Shards with low survival scores are archived first, protecting foundational anchors even if they are old.
 4. **Storage Hygiene:** The Janitor automatically runs DB-specific tuning (VACUUM ANALYZE, HNSW tuning, PRAGMA optimize) after evictions.
 

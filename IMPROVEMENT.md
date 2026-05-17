@@ -34,6 +34,13 @@ This document tracks the resolution of architectural bottlenecks and outlines fu
 - Eviction targets are now identified using PageRank (via GDS) to preserve "hub" shards that link disparate contexts.
 - All thresholds externalized to `.env` for transparent tuning.
 
+## ✅ Resolved: Enhanced Observability & Metric Definitions (2026-05-17)
+**The Problem:** Dashboard metrics like `NEURAL_DENSITY` and `RELATIONAL_COMMUNITY` were conceptually dense and lacked immediate explanation for the user.
+**The Solution:** Integrated context-aware tooltips and standardized terminology.
+- Added `title` attributes to all UI labels in `visual_ego` to provide instant technical definitions on hover.
+- Aligned `README.md` and `IMPROVEMENT.md` terminology with the UI (e.g., standardizing on "Neural Density").
+- Clarified the meaning of `IDENTITY_ANCHORS` vs `SYSTEM_KNOWLEDGE` within the mesh topology.
+
 ## 🚀 Current Focus: Autonomous Memory & Relational Synthesis
 
 ### 1. Automatic Relational Synthesis (Phase 11)

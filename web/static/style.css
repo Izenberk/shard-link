@@ -10,6 +10,28 @@
     --core-color: #ff9b3a; /* Vibrant Gold/Orange for Core */
 }
 
+/* Glossary Overlay */
+.glossary-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.9);
+    width: 500px;
+    background: var(--panel-bg);
+    backdrop-filter: blur(30px);
+    border: 1px solid var(--accent);
+    box-shadow: 0 0 30px rgba(94, 243, 255, 0.2);
+    z-index: 100;
+    display: none;
+    opacity: 0;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.glossary-overlay.active {
+    display: block;
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+}
+
 body { 
     font-family: 'JetBrains Mono', monospace; 
     background: var(--bg-color); 
@@ -21,18 +43,47 @@ body {
 /* SVG Elements */
 .node { 
     stroke-width: 0; 
-    transition: fill 0.2s, stroke 0.2s, stroke-width 0.2s, r 0.2s, filter 0.2s; 
+    transition: fill 0.2s, stroke 0.2s, stroke-width 0.2s, r 0.2s, filter 0.3s; 
     cursor: pointer;
 }
-.node.core { filter: drop-shadow(0 0 12px var(--core-color)); }
-.node.doc { filter: drop-shadow(0 0 10px var(--doc-glow)); }
-.node.memory { filter: drop-shadow(0 0 6px rgba(0, 212, 255, 0.3)); }
+.node.core { filter: drop-shadow(0 0 10px var(--core-color)); }
+.node.doc { filter: drop-shadow(0 0 8px var(--doc-glow)); }
+.node.memory { filter: drop-shadow(0 0 5px var(--shard-glow)); }
+
+/* Shard Bloom Effect */
+@keyframes nodeBloom {
+    0% { filter: brightness(1) drop-shadow(0 0 5px var(--accent)); }
+    50% { filter: brightness(1.1) drop-shadow(0 0 10px var(--accent)); }
+    100% { filter: brightness(1) drop-shadow(0 0 5px var(--accent)); }
+}
+
+.node:hover {
+    filter: brightness(1.2) drop-shadow(0 0 12px var(--accent)) !important;
+}
 
 .link { 
     stroke: var(--accent); 
-    stroke-opacity: 0.3; 
-    stroke-width: 1px;
+    stroke-opacity: 0.25; 
+    stroke-width: 1.2px;
     cursor: pointer;
+    filter: drop-shadow(0 0 2px var(--accent));
+    stroke-linecap: round;
+    transition: stroke-opacity 0.3s, filter 0.3s;
+}
+
+.link:hover {
+    stroke-opacity: 0.8;
+    filter: drop-shadow(0 0 6px var(--accent));
+}
+
+@keyframes neuralPulse {
+    0% { stroke-opacity: 0.15; filter: drop-shadow(0 0 1px var(--accent)); }
+    50% { stroke-opacity: 0.35; filter: drop-shadow(0 0 4px var(--accent)); }
+    100% { stroke-opacity: 0.15; filter: drop-shadow(0 0 1px var(--accent)); }
+}
+
+.link.active {
+    animation: neuralPulse 3s infinite ease-in-out;
 }
 
 /* Selection HUD Overlay */
@@ -134,7 +185,16 @@ h3 { margin: 0 0 15px 0; color: var(--accent); font-size: 11px; letter-spacing: 
 
 .detail-body { padding: 30px; overflow-y: auto; flex-grow: 1; }
 .detail-field { margin-bottom: 25px; }
-.detail-label { color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 8px; display: block; }
+.detail-label { 
+    color: var(--text-muted); 
+    font-size: 10px; 
+    text-transform: uppercase; 
+    letter-spacing: 1.5px; 
+    margin-bottom: 8px; 
+    display: inline-block; 
+    border-bottom: 1px dashed rgba(88, 166, 255, 0.4);
+    cursor: help;
+}
 .detail-value { font-weight: 500; color: #fff; font-size: 13px; line-height: 1.5; }
 
 .content-box { 

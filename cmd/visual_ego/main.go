@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/izenberk/shard-link/internal/storage"
 	"github.com/joho/godotenv"
@@ -18,6 +19,7 @@ type VizNode struct {
 	Content   string  `json:"content"`
 	Community int64   `json:"community"`
 	PageRank  float64 `json:"pagerank"`
+	Survival  float64 `json:"survival"`
 	CreatedAt string  `json:"created_at"`
 }
 
@@ -76,9 +78,9 @@ func main() {
 
 	log.Printf("Visual Ego Live Dashboard ignited on :8081\n")
 	log.Fatal(http.ListenAndServe(":8081", nil))
-	}
+}
 
-	func (s *Server) handleBonds(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleBonds(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	switch r.Method {
@@ -126,7 +128,8 @@ func main() {
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
-	}
+}
+
 func (s *Server) handleGetGraph(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	shards, bonds, err := s.vessel.GetGraphData(ctx)
@@ -170,8 +173,50 @@ func (s *Server) packData(shards []storage.Shard, bonds []storage.ShardBond) Viz
 		Nodes: make([]VizNode, len(shards)),
 		Links: make([]VizLink, len(bonds)),
 	}
+
+	// Calculate bond counts for survival estimation
+	bondCounts := make(map[string]int)
+	for _, b := range bonds {
+		bondCounts[b.FromID]++
+		bondCounts[b.ToID]++
+	}
+
 	for i, s := range shards {
-		data.Nodes[i] = VizNode{ID: s.ID, Category: s.Category, Content: s.Content, Community: s.CommunityID, CreatedAt: s.CreatedAt.Format("2006-01-02 15:04:05")}
+		// Resilience Fix: Handle zero-value timestamps (0001-01-01)
+		createdAt := s.CreatedAt
+		if createdAt.IsZero() || createdAt.Year() < 2000 {
+			createdAt = time.Now().Add(-1 * time.Hour) // Treat as 1 hour old if invalid
+		}
+
+		hoursSince := time.Since(createdAt).Hours()
+		if hoursSince < 1 {
+			hoursSince = 1
+		}
+
+		links := float64(bondCounts[s.ID])
+		// Score = (Density * Centrality * 100) / TimeFactor
+		// We add 1.0 to PageRank to ensure even isolated nodes have a base survival chance
+		rawScore := (links * (s.PageRank + 1.0) * 10) / hoursSince
+		
+		// Normalize to 0-100 scale for UI consistency
+		survival := rawScore
+		if survival > 95 {
+			survival = 95 // Cap non-core at 95 to keep Core as the absolute ceiling
+		}
+
+		if s.Category == "core" {
+			survival = 100 // Core shards are the "Gold Standard" (100)
+		}
+
+		data.Nodes[i] = VizNode{
+			ID:        s.ID,
+			Category:  s.Category,
+			Content:   s.Content,
+			Community: s.CommunityID,
+			PageRank:  s.PageRank,
+			Survival:  survival,
+			CreatedAt: createdAt.Format("2006-01-02 15:04:05"),
+		}
 	}
 	for i, b := range bonds {
 		data.Links[i] = VizLink{Source: b.FromID, Target: b.ToID, Weight: b.Weight}
