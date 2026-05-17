@@ -23,6 +23,7 @@ type Shard struct {
 	LastUsed    time.Time
 	CreatedAt   time.Time
 	UseCount    int
+	BondCount   int
 }
 
 // ShardBond represents a semantic link between fragments.

@@ -452,7 +452,11 @@ func (v *VesselGraph) GetAllBonds(ctx context.Context) ([]ShardBond, error) {
 }
 
 func (v *VesselGraph) GetAllShards(ctx context.Context) ([]Shard, error) {
-	query := "MATCH (s:Shard) RETURN s"
+	query := `
+	MATCH (s:Shard) 
+	OPTIONAL MATCH (s)-[r:CONNECTED_TO]-()
+	RETURN s, count(r) as degree
+	`
 	result, err := neo4j.ExecuteQuery(ctx, v.driver, query, nil, neo4j.EagerResultTransformer,
 		neo4j.ExecuteQueryWithDatabase(v.dbName))
 	if err != nil {
@@ -462,7 +466,10 @@ func (v *VesselGraph) GetAllShards(ctx context.Context) ([]Shard, error) {
 	var shards []Shard
 	for _, record := range result.Records {
 		node, _ := record.Get("s")
-		shards = append(shards, nodeToShard(node.(neo4j.Node)))
+		degree, _ := record.Get("degree")
+		shard := nodeToShard(node.(neo4j.Node))
+		shard.BondCount = int(degree.(int64))
+		shards = append(shards, shard)
 	}
 	return shards, nil
 }
@@ -540,7 +547,8 @@ func (v *VesselGraph) SearchGraph(ctx context.Context, queryVector []byte, limit
 	OPTIONAL MATCH (center)-[r:CONNECTED_TO]-(neighbor:Shard)
 	SET neighbor.last_used = datetime(),
 	    neighbor.use_count = coalesce(neighbor.use_count, 0) + 1
-	RETURN center, collect({node: neighbor, weight: r.weight}) as neighbors
+	WITH center, neighbor, r
+	RETURN center, count(r) as centerDegree, collect({node: neighbor, weight: r.weight}) as neighbors
 	`
 	params := map[string]any{
 		"vector": vec,
@@ -554,12 +562,17 @@ func (v *VesselGraph) SearchGraph(ctx context.Context, queryVector []byte, limit
 
 	var shards []Shard
 	var bonds []ShardBond
+	seen := make(map[string]bool)
 	
 	if len(result.Records) > 0 {
 		record := result.Records[0]
 		centerNode, _ := record.Get("center")
+		centerDegree, _ := record.Get("centerDegree")
+		
 		centerShard := nodeToShard(centerNode.(neo4j.Node))
+		centerShard.BondCount = int(centerDegree.(int64))
 		shards = append(shards, centerShard)
+		seen[centerShard.ID] = true
 
 		neighbors, _ := record.Get("neighbors")
 		for _, nMap := range neighbors.([]any) {
@@ -570,7 +583,14 @@ func (v *VesselGraph) SearchGraph(ctx context.Context, queryVector []byte, limit
 			}
 			
 			neighborShard := nodeToShard(neighborNode.(neo4j.Node))
-			shards = append(shards, neighborShard)
+			// Note: neighborShard.BondCount is NOT populated here because it requires another query or a complex subquery.
+			// However, since it's a neighbor, we know it has at least 1 bond (to the center).
+			// For now, let's keep it simple and populate it in GetAllShards for the full graph view.
+			
+			if !seen[neighborShard.ID] {
+				shards = append(shards, neighborShard)
+				seen[neighborShard.ID] = true
+			}
 			
 			// Capture the bond
 			weight, _ := m["weight"].(float64)
