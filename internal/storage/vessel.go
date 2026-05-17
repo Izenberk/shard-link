@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/binary"
 	"fmt"
+	"log"
 	"math"
 	"os"
 	"sync"
@@ -115,6 +116,7 @@ func (v *Vessel) SaveShard(ctx context.Context, s Shard) error {
 	if err := stmt.Exec(); err != nil {
 		return fmt.Errorf("exec save: %w", err)
 	}
+	log.Printf("[Vessel-SQLite] Shard Saved: %s (Category: %s)", s.ID, s.Category)
 	return nil
 }
 

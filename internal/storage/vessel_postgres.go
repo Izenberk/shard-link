@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"log"
 	"math"
 	"strconv"
 	"strings"
@@ -55,6 +56,9 @@ func (v *PostgresVessel) SaveShard(ctx context.Context, s Shard) error {
 			last_used = CURRENT_TIMESTAMP;
 	`
 	_, err := v.pool.Exec(ctx, query, s.ID, s.Category, s.Content, formatVector(s.Vector), s.Metadata, s.SourceType, s.SourceRef, s.Confidence)
+	if err == nil {
+		log.Printf("[Vessel-Postgres] Shard Saved: %s (Category: %s)", s.ID, s.Category)
+	}
 	return err
 }
 
