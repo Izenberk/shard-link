@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS shards (
     confidence  REAL DEFAULT 1.0,   -- 0.0 - 1.0 Reliability Score
 
     last_used   DATETIME DEFAULT CURRENT_TIMESTAMP,
-    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    use_count   INTEGER DEFAULT 1
 );
 
 -- THE BASEMENT (Tiered/Archival Storage)
@@ -28,7 +29,8 @@ CREATE TABLE IF NOT EXISTS shards_archive (
     source_ref  TEXT,
     confidence  REAL DEFAULT 1.0,
 
-    archived_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    archived_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    use_count   INTEGER DEFAULT 1
 );
 
 -- Relational Mesh

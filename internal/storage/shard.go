@@ -22,6 +22,7 @@ type Shard struct {
 	PageRank    float64 // Semantic Centrality Score
 	LastUsed    time.Time
 	CreatedAt   time.Time
+	UseCount    int
 }
 
 // ShardBond represents a semantic link between fragments.

@@ -196,10 +196,21 @@ func (s *Server) packData(shards []storage.Shard, bonds []storage.ShardBond) Viz
 			hoursSince = 1
 		}
 
+		// Frequency-Weighted Retention (Long-Term Potentiation)
+		// More hits = slower decay. Each hit adds "Decay Resistance".
+		// We use log2(hits + 1) to provide diminishing returns for extreme popularity.
+		vitality := 1.0
+		if s.UseCount > 1 {
+			// Using 1.0 + math.Log2(float64(s.UseCount)) as a multiplier
+			vitality = 1.0 + (float64(s.UseCount) * 0.1) // Simpler linear boost for now: +10% per hit
+			if vitality > 5.0 {
+				vitality = 5.0 // Cap vitality boost at 5x
+			}
+		}
+
 		links := float64(bondCounts[s.ID])
-		// Score = (Density * Centrality * 100) / TimeFactor
-		// We add 1.0 to PageRank to ensure even isolated nodes have a base survival chance
-		rawScore := (links * (s.PageRank + 1.0) * 10) / hoursSince
+		// Score = (Density * Centrality * Vitality * 10) / TimeFactor
+		rawScore := (links * (s.PageRank + 1.0) * 10 * vitality) / hoursSince
 		
 		// Normalize to 0-100 scale for UI consistency
 		survival := rawScore

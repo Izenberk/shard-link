@@ -130,7 +130,8 @@ func (v *VesselGraph) FindResonant(ctx context.Context, queryVector []byte, limi
 	query := `
 	CALL db.index.vector.queryNodes('shard_embeddings', $limit, $vector)
 	YIELD node, score
-	SET node.last_used = datetime()
+	SET node.last_used = datetime(),
+	    node.use_count = coalesce(node.use_count, 0) + 1
 	RETURN node
 	`
 
@@ -329,6 +330,13 @@ func nodeToShard(node neo4j.Node) Shard {
 	lu, _ := time.Parse(time.RFC3339, luStr)
 	ca, _ := time.Parse(time.RFC3339, caStr)
 
+	var useCount int
+	if uc, ok := props["use_count"].(int64); ok {
+		useCount = int(uc)
+	} else if uc, ok := props["use_count"].(float64); ok {
+		useCount = int(uc)
+	}
+
 	// Extract Community ID and PageRank
 	var commID int64
 	if c, ok := props["community"].(int64); ok {
@@ -373,6 +381,7 @@ func nodeToShard(node neo4j.Node) Shard {
 		PageRank:    rank,
 		LastUsed:    lu,
 		CreatedAt:   ca,
+		UseCount:    useCount,
 	}
 }
 
@@ -525,9 +534,12 @@ func (v *VesselGraph) SearchGraph(ctx context.Context, queryVector []byte, limit
 	query := `
 	CALL db.index.vector.queryNodes('shard_embeddings', 1, $vector)
 	YIELD node AS center, score
-	SET center.last_used = datetime()
+	SET center.last_used = datetime(),
+	    center.use_count = coalesce(center.use_count, 0) + 1
+	WITH center
 	OPTIONAL MATCH (center)-[r:CONNECTED_TO]-(neighbor:Shard)
-	SET neighbor.last_used = datetime()
+	SET neighbor.last_used = datetime(),
+	    neighbor.use_count = coalesce(neighbor.use_count, 0) + 1
 	RETURN center, collect({node: neighbor, weight: r.weight}) as neighbors
 	`
 	params := map[string]any{
