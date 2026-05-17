@@ -124,6 +124,9 @@ function updateViz() {
     simulation.force("link").links(data.links);
     simulation.alpha(0.3).restart();
 
+    if (data.threshold) {
+        document.getElementById('stat-t').innerText = data.threshold.toFixed(2);
+    }
     document.getElementById('stat-n').innerText = data.nodes.length;
     document.getElementById('stat-e').innerText = data.links.length;
     updateNeighborhoods();

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -58,8 +59,9 @@ type VizLink struct {
 }
 
 type VizData struct {
-	Nodes []VizNode `json:"nodes"`
-	Links []VizLink `json:"links"`
+	Nodes     []VizNode `json:"nodes"`
+	Links     []VizLink `json:"links"`
+	Threshold float64   `json:"threshold"`
 }
 
 type Server struct {
@@ -284,9 +286,16 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) packData(shards []storage.Shard, bonds []storage.ShardBond) VizData {
+	tStr := os.Getenv("MESH_LINK_THRESHOLD")
+	threshold, _ := strconv.ParseFloat(tStr, 64)
+	if threshold == 0 {
+		threshold = 0.75
+	}
+
 	data := VizData{
-		Nodes: make([]VizNode, len(shards)),
-		Links: make([]VizLink, len(bonds)),
+		Nodes:     make([]VizNode, len(shards)),
+		Links:     make([]VizLink, len(bonds)),
+		Threshold: threshold,
 	}
 
 	// Calculate bond counts for survival estimation

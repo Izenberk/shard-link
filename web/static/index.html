@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Shard-Link: Visual Ego Live</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="controls">
+        <div class="control-section">
+            <h3 title="The entry point for semantic and relational queries across the Knowledge Mesh.">SYSTEM_LOCATE</h3>
+            <div class="search-container">
+                <span class="search-icon">⌕</span>
+                <input type="text" id="search" placeholder="SEMANTIC_QUERY..." onkeypress="if(event.key === 'Enter') semanticSearch()">
+            </div>
+            <div class="btn-group">
+                <div class="hud-btn" onclick="semanticSearch()" title="Execute a vector-similarity search to find resonant shards.">SEARCH</div>
+                <div class="hud-btn" onclick="loadGraph()" title="Reload the full Knowledge Mesh view.">RESET</div>
+            </div>
+        </div>
+        <div class="control-section">
+            <h3 title="Visual representation of shard relationships, communities, and centrality.">MESH_TOPOLOGY</h3>
+            <div class="legend-item" style="color: var(--core-color)" title="Immutable anchor shards representing your core identity or profile."><div class="legend-color" style="background: var(--core-color); box-shadow: 0 0 8px var(--core-color)"></div> IDENTITY_ANCHOR</div>
+            <div class="legend-item" style="color: var(--doc-glow)" title="Non-core shards containing general knowledge or project data."><div class="legend-color" style="background: var(--doc-glow); box-shadow: 0 0 8px var(--doc-glow)"></div> SYSTEM_KNOWLEDGE</div>
+            <div class="legend-item" style="color: #5ef3ff" title="A group of shards with high internal connectivity, indicating a specific topic."><div class="legend-color" style="background: #5ef3ff; box-shadow: 0 0 8px #5ef3ff"></div> SEMANTIC_COMMUNITY</div>
+            
+            <div style="margin-top: 20px;">
+                <h4 style="font-size: 9px; color: var(--text-muted); letter-spacing: 1px; margin-bottom: 10px;" title="Detected clusters of related shards via Louvain Community Detection.">ACTIVE_NEIGHBORHOODS</h4>
+                <div id="neighborhoods-list" style="display: flex; flex-wrap: wrap; gap: 5px;">
+                    <!-- Populated via JS -->
+                </div>
+            </div>
+
+            <div id="stat-container" style="font-size: 10px; color: var(--text-muted); margin-top: 15px; font-family: 'JetBrains Mono';">
+                MESH_SENSITIVITY: <span id="stat-t" style="color: var(--accent)" title="The minimum semantic similarity required for the system to autonomously forge a bond.">0.00</span> | 
+                SHARDS: <span id="stat-n" style="color: var(--accent)" title="Total number of discrete context fragments in the Mesh.">0</span> | 
+                BONDS: <span id="stat-e" style="color: var(--accent)" title="Total number of semantic relationships established between shards.">0</span>
+            </div>
+
+            <div style="margin-top: 20px; border-top: 1px solid var(--panel-border); padding-top: 15px;">
+                <div class="hud-btn" onclick="toggleGlossary()" id="glossary-btn" style="font-size: 10px;">SHOW_GLOSSARY</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="bottom-toolbar">
+        <div class="toolbar-group">
+            <div class="tool-btn" onclick="zoomIn()" title="Zoom In">+</div >
+            <div class="tool-btn" onclick="zoomOut()" title="Zoom Out">-</div>
+        </div>
+        <div class="toolbar-divider"></div>
+        <div class="tool-btn" id="bond-mode-btn" onclick="toggleBondMode()" title="Manual Bonding Mode">BOND_MODE: OFF</div>
+        <div class="toolbar-divider"></div>
+        <div class="tool-btn" onclick="resetView()" title="Recenter View">⌖</div>
+    </div>
+
+    <div id="details">
+        <div class="detail-header">
+            <span class="detail-header-title">ENTITY_INSPECTOR</span>
+            <span class="close-btn" onclick="closeSidebar()" style="cursor:pointer; color: var(--accent)">×</span>
+        </div>
+        <div class="detail-body">
+            <div class="detail-field"><span class="detail-label" title="Unique identifier for this specific shard.">SHARD_ID</span> <span class="detail-value" id="det-id" style="color: var(--accent);"></span></div>
+            <div class="detail-field"><span class="detail-label" title="Total number of semantic bonds connected to this shard. High density denotes a central 'hub' concept.">NEURAL_DENSITY</span> <span class="detail-value" id="det-density">--</span></div>
+            <div class="detail-field"><span class="detail-label" title="Relational Centrality (PageRank) of this shard. High score indicates a key node in the semantic graph.">RELATIONAL_CENTRALITY</span> <span class="detail-value" id="det-rank">--</span></div>
+            <div class="detail-field"><span class="detail-label" title="Estimated survival score based on centrality, density, and age. Low scores are targeted for eviction.">SURVIVAL_SCORE</span> <span class="detail-value" id="det-survival">--</span></div>
+            <div class="detail-field"><span class="detail-label" title="The precise timestamp when this shard was first committed to the Knowledge Mesh.">TEMPORAL_MARK</span> <span class="detail-value" id="det-time"></span></div>
+            <div class="detail-field"><span class="detail-label" title="The community ID (neighborhood) this shard belongs to, derived via Louvain clustering.">RELATIONAL_COMMUNITY</span> <span class="detail-value" id="det-comm"></span></div>
+            <div class="detail-field"><span class="detail-label" title="The original text content stored within this shard.">RAW_COGNITIVE_CONTENT</span> <div class="content-box" id="det-content"></div></div>
+        </div>
+    </div>
+
+    <div id="mesh-glossary" class="glossary-overlay">
+        <div class="detail-header">
+            <span class="detail-header-title">MESH_GLOSSARY</span>
+            <span class="close-btn" onclick="toggleGlossary()" style="cursor:pointer; color: var(--accent)">×</span>
+        </div>
+        <div style="padding: 30px;">
+            <div class="detail-field">
+                <span class="detail-label">NEURAL_DENSITY</span>
+                <div style="color: var(--text-main); font-size: 13px;">
+                    Connectivity count.
+                    <br>• <strong style="color: var(--accent);">> 5:</strong> Dense Hub (Critical Context).
+                    <br>• <strong style="color: var(--accent);">0 - 1:</strong> Orphan Shard (Candidate for Eviction).
+                </div>
+            </div>
+            <div class="detail-field">
+                <span class="detail-label">RELATIONAL_CENTRALITY</span>
+                <div style="color: var(--text-main); font-size: 13px;">
+                    PageRank (Importance) Score.
+                    <br>• <strong style="color: var(--accent);">> 1.0:</strong> Foundational Knowledge Node.
+                    <br>• <strong style="color: var(--accent);">< 0.5:</strong> Peripheral / Transient detail.
+                </div>
+            </div>
+            <div class="detail-field">
+                <span class="detail-label">SURVIVAL_SCORE</span>
+                <div style="color: var(--text-main); font-size: 13px;">
+                    Probability of retention (0-100). 
+                    <br>• <strong style="color: var(--accent);">90-100:</strong> Maximum safety (Core Shards).
+                    <br>• <strong style="color: var(--accent);">< 20:</strong> Target for automated Janitor eviction.
+                </div>
+            </div>
+            <div class="detail-field">
+                <span class="detail-label">RELATIONAL_COMMUNITY</span>
+                <div style="color: var(--text-main); font-size: 13px;">
+                    Topical clustering ID (N_#). Shards in the same community share a distinct semantic domain.
+                </div>
+            </div>
+            <div class="detail-field">
+                <span class="detail-label">IDENTITY_ANCHOR</span>
+                <div style="color: var(--text-main); font-size: 13px;">
+                    Immutable "Core" fragments. These always maintain a Survival Score of <strong style="color: var(--accent);">100</strong>.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <svg id="viz"></svg>
+
+    <div id="activity-feed">
+        <div class="activity-header">
+            <span>SILICON_ACTIVITY_FEED</span>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <div id="status-dot"></div>
+                <span onclick="clearLogs()" style="cursor:pointer; color: var(--accent); font-size: 9px; letter-spacing: 1px;">CLEAR</span>
+            </div>
+        </div>
+        <div id="log-container"></div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
