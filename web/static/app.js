@@ -291,3 +291,60 @@ setInterval(() => {
 }, 15000);
 
 window.addEventListener('resize', () => { svg.attr("width", window.innerWidth).attr("height", window.innerHeight); });
+
+// Activity Feed Implementation
+function initActivityFeed() {
+    const logContainer = document.getElementById('log-container');
+    const statusDot = document.getElementById('status-dot');
+    const evtSource = new EventSource('/api/activity');
+
+    evtSource.onmessage = (event) => {
+        const entry = JSON.parse(event.data);
+        addLogEntry(entry);
+    };
+
+    evtSource.onerror = () => {
+        statusDot.classList.add('offline');
+    };
+
+    evtSource.onopen = () => {
+        statusDot.classList.remove('offline');
+    };
+}
+
+function addLogEntry(entry) {
+    const container = document.getElementById('log-container');
+    const div = document.createElement('div');
+    div.className = 'log-entry';
+    div.innerHTML = `<span class="log-time">[${entry.timestamp}]</span> <span class="log-type-${entry.type}">${entry.message}</span>`;
+    
+    if (entry.shard_id) {
+        div.onclick = () => focusOnShard(entry.shard_id);
+    }
+
+    container.prepend(div);
+    if (container.children.length > 50) {
+        container.removeChild(container.lastChild);
+    }
+}
+
+function focusOnShard(id) {
+    const d = data.nodes.find(n => n.id === id);
+    if (d) {
+        selectNode(null, d);
+        // Center the view on this node
+        const transform = d3.zoomIdentity.translate(width / 2 - d.x, height / 2 - d.y).scale(1.5);
+        d3.select('#viz').transition().duration(750).call(zoom.transform, transform);
+    } else {
+        // If not in current view, perform a semantic search for it
+        document.getElementById('search').value = id;
+        semanticSearch();
+    }
+}
+
+function clearLogs() {
+    document.getElementById('log-container').innerHTML = '';
+}
+
+// Start activity feed on load
+initActivityFeed();

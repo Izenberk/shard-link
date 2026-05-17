@@ -97,8 +97,8 @@ func (v *VesselGraph) SaveShard(ctx context.Context, s Shard) error {
 
 	_, err := neo4j.ExecuteQuery(ctx, v.driver, query, params, neo4j.EagerResultTransformer,
 		neo4j.ExecuteQueryWithDatabase(v.dbName))
-	if err != nil {
-		return err
+	if err == nil && GlobalLogger != nil {
+		GlobalLogger(fmt.Sprintf("Shard Saved: %s", s.ID), "success", s.ID)
 	}
 	log.Printf("[Vessel] Shard Saved: %s (Category: %s)", s.ID, s.Category)
 
@@ -407,6 +407,9 @@ func (v *VesselGraph) ArchiveShard(ctx context.Context, id string) error {
 	_, err := neo4j.ExecuteQuery(ctx, v.driver, query, map[string]any{"id": id}, neo4j.EagerResultTransformer,
 		neo4j.ExecuteQueryWithDatabase(v.dbName))
 	if err == nil {
+		if GlobalLogger != nil {
+			GlobalLogger(fmt.Sprintf("Shard Evicted: %s", id), "evict", id)
+		}
 		log.Printf("[Vessel] Shard Evicted/Deleted: %s", id)
 	}
 	return err
@@ -428,6 +431,9 @@ func (v *VesselGraph) SaveBond(ctx context.Context, b ShardBond) error {
 	_, err := neo4j.ExecuteQuery(ctx, v.driver, query, params, neo4j.EagerResultTransformer,
 		neo4j.ExecuteQueryWithDatabase(v.dbName))
 	if err == nil {
+		if GlobalLogger != nil {
+			GlobalLogger(fmt.Sprintf("Bond Forged: %s <-> %s", b.FromID, b.ToID), "bond", b.FromID)
+		}
 		log.Printf("[Vessel] Bond Forged: %s <-> %s (w: %.2f)", b.FromID, b.ToID, b.Weight)
 	}
 	return err

@@ -7,11 +7,39 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/izenberk/shard-link/internal/storage"
 	"github.com/joho/godotenv"
 )
+
+type ActivityEntry struct {
+	Timestamp string `json:"timestamp"`
+	Type      string `json:"type"` // "info", "warn", "success", "evict", "bond"
+	Message   string `json:"message"`
+	ShardID   string `json:"shard_id,omitempty"`
+}
+
+var (
+	activityFeed = make(chan ActivityEntry, 100)
+	clients      = make(map[chan ActivityEntry]bool)
+	clientMux    sync.Mutex
+)
+
+func broadcastActivity(e ActivityEntry) {
+	if e.Timestamp == "" {
+		e.Timestamp = time.Now().Format("15:04:05")
+	}
+	clientMux.Lock()
+	defer clientMux.Unlock()
+	for c := range clients {
+		select {
+		case c <- e:
+		default:
+		}
+	}
+}
 
 type VizNode struct {
 	ID        string  `json:"id"`
@@ -63,6 +91,14 @@ func main() {
 		embedder: emb,
 	}
 
+	storage.GlobalLogger = func(msg string, category string, shardID string) {
+		broadcastActivity(ActivityEntry{
+			Message: msg,
+			Type:    category,
+			ShardID: shardID,
+		})
+	}
+
 	// 1. Background Analysis (Phase 10: Standalone Intelligence)
 	go func() {
 		log.Println("[Background] Starting initial mesh analysis...")
@@ -75,9 +111,40 @@ func main() {
 	http.HandleFunc("/api/graph", srv.handleGetGraph)
 	http.HandleFunc("/api/search", srv.handleSearch)
 	http.HandleFunc("/api/bonds", srv.handleBonds)
+	http.HandleFunc("/api/activity", srv.handleActivity)
 
 	log.Printf("Visual Ego Live Dashboard ignited on :8081\n")
 	log.Fatal(http.ListenAndServe(":8081", nil))
+}
+
+func (s *Server) handleActivity(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	ch := make(chan ActivityEntry, 10)
+	clientMux.Lock()
+	clients[ch] = true
+	clientMux.Unlock()
+
+	defer func() {
+		clientMux.Lock()
+		delete(clients, ch)
+		clientMux.Unlock()
+		close(ch)
+	}()
+
+	notify := r.Context().Done()
+	for {
+		select {
+		case <-notify:
+			return
+		case e := <-ch:
+			data, _ := json.Marshal(e)
+			fmt.Fprintf(w, "data: %s\n\n", data)
+			w.(http.Flusher).Flush()
+		}
+	}
 }
 
 func (s *Server) handleBonds(w http.ResponseWriter, r *http.Request) {
@@ -122,6 +189,11 @@ func (s *Server) handleBonds(w http.ResponseWriter, r *http.Request) {
 		}
 		
 		deleted, _ := result.Records[0].Get("deleted")
+		if deleted.(int64) > 0 {
+			if storage.GlobalLogger != nil {
+				storage.GlobalLogger(fmt.Sprintf("Bond Severed: %s <-/-> %s", from, to), "warn", from)
+			}
+		}
 		log.Printf("[API] Successfully removed %v semantic bonds.", deleted)
 		w.WriteHeader(http.StatusNoContent)
 

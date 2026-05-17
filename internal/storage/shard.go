@@ -5,6 +5,11 @@ import (
 	"time"
 )
 
+// LogFunc is a callback for broadcasting system activity.
+type LogFunc func(msg string, category string, shardID string)
+
+var GlobalLogger LogFunc
+
 // Shard is the atomic unit of long-term memory.
 type Shard struct {
 	ID          string
