@@ -54,6 +54,23 @@ func main() {
 	}
 	defer v.Close()
 
+	// 2.5 Initialize Activity Ledger (SQLite) for cross-process logging
+	dbPath := os.Getenv("DATABASE_PATH")
+	if dbPath == "" {
+		dbPath = "data/shard-link.db"
+	}
+	lv, err := storage.NewVessel(dbPath)
+	if err == nil {
+		storage.GlobalLogger = func(msg string, category string, shardID string) {
+			_ = lv.SaveActivity(context.Background(), storage.ShardActivity{
+				Type:    category,
+				Message: msg,
+				ShardID: shardID,
+			})
+		}
+		log.Println("SHARD-LINK: Activity Ledger Connected (SQLite)")
+	}
+
 	// 3. Summon the Servants (Janitor & Synthesizer)
 	jan := janitor.NewJanitor(v, 15*time.Minute, 1000)
 	syn := synthesizer.NewSynthesizer(v, 10*time.Minute)
