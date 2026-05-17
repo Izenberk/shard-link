@@ -50,7 +50,7 @@ Where:
 - **V (Vitality/Potentiation):** A frequency-weighted boost (+10% per retrieval hit, capped at 5x).
 - **T (Time Decay):** Hours since last use (Usage Reinforcement). Shards that are frequently retrieved "stay fresh," effectively resetting their decay clock.
 
-**Note:** Core shards are manually set to `S = 100`, making them functionally immortal.
+**Note:** Core shards are manually set to `S = 100`, making them functionally immortal. Any shard with a score **below 20** is considered " transient" and becomes a primary candidate for eviction by The Janitor.
 
 ### 4.2 Long-Term Potentiation (LTP)
 Shard-Link mimics human cognitive reinforcement through **Frequency-Weighted Retention**. Each time a shard is retrieved via search, its `use_count` increments, increasing its **Vitality**. This ensures that "popular" or high-utility memories stay protected from eviction significantly longer than transient ones.

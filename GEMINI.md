@@ -17,7 +17,7 @@ Shard-Link is a high-performance context engine designed to provide "long-term m
 ## 3. High-Precision Vectors
 - **Format:** Vectors must be handled as `[]float32` internally.
 - **Serialization:** When converting to strings (for SQL/Cypher), use `strconv.FormatFloat(f, 'g', -1, 32)` to prevent precision loss. NEVER use `fmt.Sprintf("%f")`.
-- **Dimensions:** Standardize on 1536-D (OpenAI/Gemini compatible).
+- **Dimensions:** Standardize on 3072-D (Gemini/Production compatible).
 
 ## 4. Domain Language & Logic
 - **Shards:** Atomic contextual fragments with vector embeddings.
