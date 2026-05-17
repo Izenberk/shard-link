@@ -59,9 +59,16 @@ func (s *Synthesizer) performSynthesis(ctx context.Context) {
 	if count > 0 {
 		log.Printf("[Synthesizer] Aha! Established %d new semantic bonds autonomously.", count)
 		
-		// After linking, it's a good idea to refresh communities
-		log.Println("[Synthesizer] Refreshing Knowledge Neighborhoods (Louvain)...")
-		_, _ = s.vessel.CalculateCommunities(ctx)
+		// After linking, trigger community refresh asynchronously to avoid blocking
+		go func() {
+			log.Println("[Synthesizer] Refreshing Knowledge Neighborhoods (Louvain)...")
+			// Use a background context for the async task to ensure it completes
+			bgCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			if _, err := s.vessel.CalculateCommunities(bgCtx); err != nil {
+				log.Printf("[Synthesizer ERROR] Failed to calculate communities: %v", err)
+			}
+		}()
 	} else {
 		log.Println("[Synthesizer] No new relationships identified in this cycle.")
 	}

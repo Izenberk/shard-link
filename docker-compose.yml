@@ -9,7 +9,7 @@ services:
       db:
         condition: service_started
       neo4j:
-        condition: service_started
+        condition: service_healthy
     environment:
       - DATABASE_URL=postgres://sharduser:shardpass@db:5432/shardlink?sslmode=disable
       - DATABASE_PATH=/app/data/shard-link.db

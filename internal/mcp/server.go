@@ -284,7 +284,7 @@ func (s *MCPServer) StartSSE(port int, baseURL string) error {
 	log.Printf("[MCP] Starting SSE Server on :%d with baseURL: %s", port, baseURL)
 	sseServer := server.NewSSEServer(s.mcp,
 		server.WithBaseURL(baseURL),
-		server.WithKeepAliveInterval(15*time.Second),
+		server.WithKeepAliveInterval(10*time.Second),
 	)
 
 	mux := http.NewServeMux()

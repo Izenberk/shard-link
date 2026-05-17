@@ -20,37 +20,48 @@ func main() {
 		log.Println("WARNING: HUB_API_KEY is not set. Server is running without authentication.")
 	}
 
-	// 2. Ignite the Vessel
+	// 2. Ignite the Vessel with Retry Logic
 	var v storage.Repository
 	var err error
 
 	neoURL := os.Getenv("NEO4J_URL")
-	if neoURL != "" {
-		// Knowledge Mesh Mode
-		user := os.Getenv("NEO4J_USER")
-		pass := os.Getenv("NEO4J_PASS")
-		v, err = storage.NewVesselGraph(neoURL, user, pass, "neo4j")
-		if err == nil {
-			log.Println("SHARD-LINK: Knowledge Mesh Ignited (Neo4j Graph)")
+	maxRetries := 15
+	retryDelay := 10 * time.Second
+
+	for i := 0; i < maxRetries; i++ {
+		if neoURL != "" {
+			// Knowledge Mesh Mode
+			user := os.Getenv("NEO4J_USER")
+			pass := os.Getenv("NEO4J_PASS")
+			v, err = storage.NewVesselGraph(neoURL, user, pass, "neo4j")
+			if err == nil {
+				log.Println("SHARD-LINK: Knowledge Mesh Ignited (Neo4j Graph)")
+				break
+			}
+		} else if connStr := os.Getenv("DATABASE_URL"); connStr != "" {
+			// Legacy High Performance Mode
+			v, err = storage.NewPostgresVessel(context.Background(), connStr)
+			if err == nil {
+				log.Println("SHARD-LINK: PostgreSQL Vessel Ignited (Legacy storage)")
+				break
+			}
+		} else {
+			// Local-First Mode
+			dbPath := os.Getenv("DATABASE_PATH")
+			if dbPath == "" { dbPath = "data/shard-link.db" }
+			v, err = storage.NewVessel(dbPath)
+			if err == nil {
+				log.Println("SHARD-LINK: SQLite Vessel Ignited")
+				break
+			}
 		}
-	} else if connStr := os.Getenv("DATABASE_URL"); connStr != "" {
-		// Legacy High Performance Mode
-		v, err = storage.NewPostgresVessel(context.Background(), connStr)
-		if err == nil {
-			log.Println("SHARD-LINK: PostgreSQL Vessel Ignited (Legacy storage)")
-		}
-	} else {
-		// Local-First Mode
-		dbPath := os.Getenv("DATABASE_PATH")
-		if dbPath == "" { dbPath = "data/shard-link.db" }
-		v, err = storage.NewVessel(dbPath)
-		if err == nil {
-			log.Println("SHARD-LINK: SQLite Vessel Ignited")
-		}
+
+		log.Printf("Vessel failed to ignite (attempt %d/%d): %v. Retrying in %v...", i+1, maxRetries, err, retryDelay)
+		time.Sleep(retryDelay)
 	}
 
 	if err != nil {
-		log.Fatalf("Vessel failed to ignite: %v", err)
+		log.Fatalf("Vessel failed to ignite after %d attempts: %v", maxRetries, err)
 	}
 	defer v.Close()
 
