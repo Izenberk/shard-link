@@ -41,23 +41,33 @@ Shard-Link utilizes a multi-database approach to balance intelligence, stability
 ## 4. Autonomous Memory Management
 A finite context window requires a sophisticated eviction strategy. Shard-Link employs **The Janitor**, a background process that utilizes a mathematical survival model.
 
-### 4.1 The Survival Formula (v3.0)
+### 4.1 The Survival Formula (v3.5)
 Each shard is assigned a **Survival Score (0-100)**:
-$$S = \min\left(95, \frac{D \cdot (C + 1.0) \cdot 10}{T}\right)$$
+$$S = \min\left(95, \frac{D \cdot (C + 1.0) \cdot 10 \cdot V}{T}\right)$$
 Where:
-- **D (Neural Density):** Number of active bonds.
+- **D (Neural Density):** Number of active semantic bonds.
 - **C (Relational Centrality):** PageRank score.
+- **V (Vitality/Potentiation):** A frequency-weighted boost (+10% per retrieval hit, capped at 5x).
 - **T (Time Decay):** Hours since last use (Usage Reinforcement). Shards that are frequently retrieved "stay fresh," effectively resetting their decay clock.
 
 **Note:** Core shards are manually set to `S = 100`, making them functionally immortal.
 
-### 4.2 Eviction Logic
-Shards with a survival score below a critical threshold (default `20`) are candidates for eviction. This ensures the mesh remains lean, relevant, and focused on high-resonance information.
+### 4.2 Long-Term Potentiation (LTP)
+Shard-Link mimics human cognitive reinforcement through **Frequency-Weighted Retention**. Each time a shard is retrieved via search, its `use_count` increments, increasing its **Vitality**. This ensures that "popular" or high-utility memories stay protected from eviction significantly longer than transient ones.
 
 ## 5. Observability: The Visual Ego
-The **Visual Ego** dashboard provides a real-time window into the agent's subconscious.
+The **Visual Ego** dashboard provides a high-fidelity window into the agent's subconscious.
 
-### 5.1 Gravitational Physics Model
+### 5.1 Ergonomic HUD Design
+The v3.5 UI implements a professional "Command Center" layout:
+- **Unified Knowledge Sidebar:** Consolidation of semantic search and mesh telemetry into a single, high-signal vertical pane.
+- **Floating Command Bar:** A horizontal pill-shaped toolbar at the bottom-center for camera controls and manual bond management.
+- **Silicon Activity Feed:** A real-time terminal providing visibility into every shard save, bond forged, and janitor eviction.
+
+### 5.2 Persistent Activity Ledger
+To ensure total transparency, Shard-Link maintains a cross-process **Activity Ledger** in SQLite. This audit trail persists across restarts and browser refreshes, allowing the user to click any historical log entry to instantly focus the camera on the associated shard.
+
+### 5.3 Gravitational Physics Model
 The dashboard uses a D3.js force-directed graph with a "Solar System" physics model:
 - **Core Hubs:** Anchored to the center with high gravitational strength.
 - **Semantic Constellations:** Regular shards orbit their nearest anchors based on bond strength.

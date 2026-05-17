@@ -61,15 +61,16 @@ docker compose --profile local up -d --build
 - **Knowledge Mesh:** A relational graph where shards are nodes and semantic similarities are edges.
 - **Autonomous Memory (Phase 11):** Proactive link creation and mesh maintenance.
 - **The Janitor:** Background process for size management using the **Survival Formula**.
+- **Silicon Activity Feed:** A real-time terminal in the dashboard providing a persistent, interactive audit trail of all system actions.
 
 ### Survival Score (0-100):
 The system calculates a "Probability of Retention" for every shard:
 1. **Core Shards (100):** Immutable anchors representing user identity.
-2. **Stable Memory (20-95):** Regularly accessed or highly connected hubs.
+2. **Vital Memory (90-95):** Frequently used or highly connected "Knowledge Hubs."
 3. **Transient Memory (<20):** Candidates for automated eviction (orphans or old data).
 
-Formula: `S = (Density * Centrality * 10) / TimeDecay`
-*Note: TimeDecay is calculated based on **Last Used**, meaning active shards are autonomously reinforced.*
+Formula: `S = (Density * Centrality * 10 * Vitality) / TimeDecay`
+*Note: TimeDecay is based on **Last Used**, and Vitality increases with **Frequency**, meaning the system actively reinforces what you think about most.*
 
 ## 6. Development Philosophy
 - **Active Learning:** Scaffolding provided by Gemini; core logic implemented by Izenberk.

@@ -47,5 +47,26 @@ This document tracks the resolution of architectural bottlenecks and outlines fu
 - **Goal:** Enable the system to autonomously "think" and link disparate memories without manual triggers.
 - **Requirement:** Refactor the `auto_link` tool into a periodic background service (similar to the Janitor) to maintain Knowledge Mesh density in real-time.
 
+## ✅ Resolved: Usage Reinforcement & Long-Term Potentiation (2026-05-17)
+**The Problem:** Memory survival was only based on the creation date, meaning ancient but vital knowledge would eventually fade even if frequently used.
+**The Solution:** Implemented **LTP (Long-Term Potentiation)** logic.
+- Survival score is now calculated using `LastUsed` rather than `CreatedAt`.
+- Implemented **"Touch-on-Search"**: Every retrieval resets the decay clock and increments a `use_count`.
+- Added **Vitality Boost**: Frequent usage provides a multiplicative boost (+10% per hit) to survival probability, mimicking neural pathway strengthening.
+
+## ✅ Resolved: Persistent Activity Ledger & Cross-Process Auditing (2026-05-17)
+**The Problem:** Dashboard logs were in-memory and vanished on refresh; furthermore, actions taken via MCP tools were invisible to the local dashboard.
+**The Solution:** Implemented a shared **SQLite Activity Ledger**.
+- Created an `activity_logs` table in the 'Seed Memory' vessel.
+- Unified the Hub (Docker) and Dashboard (Local) processes to log all actions to this shared table.
+- Implemented **Log Hydration**: The dashboard now fetches historical logs on startup, providing a durable, clickable audit trail.
+
+## ✅ Resolved: HUD Redesign & Ergonomic Command Bar (2026-05-17)
+**The Problem:** As more monitoring panels were added (Activity Feed, Glossary), the UI became cluttered and control panels began to overlap.
+**The Solution:** Completely refactored the Visual Ego layout.
+- Moved camera and bond controls to a floating horizontal **Command Bar** at the bottom-center.
+- Unified search and topology stats into a single **Knowledge Sidebar**.
+- Integrated a dedicated, scrollable **Activity Terminal** in the bottom-left.
+
 ---
-*Last Updated: 2026-05-16*
+*Last Updated: 2026-05-17*
