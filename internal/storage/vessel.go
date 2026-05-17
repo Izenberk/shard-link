@@ -428,6 +428,51 @@ func (v *Vessel) GetGraphData(ctx context.Context) ([]Shard, []ShardBond, error)
 	return shards, bonds, nil
 }
 
+func (v *Vessel) SaveActivity(ctx context.Context, entry ShardActivity) error {
+	const query = `
+		INSERT INTO activity_logs (type, message, shard_id)
+		VALUES (?, ?, ?)
+	`
+	stmt, _, err := v.conn.Prepare(query)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	stmt.BindText(1, entry.Type)
+	stmt.BindText(2, entry.Message)
+	stmt.BindText(3, entry.ShardID)
+
+	return stmt.Exec()
+}
+
+func (v *Vessel) GetRecentActivity(ctx context.Context, limit int) ([]ShardActivity, error) {
+	const query = `
+		SELECT timestamp, type, message, shard_id 
+		FROM activity_logs 
+		ORDER BY timestamp DESC 
+		LIMIT ?
+	`
+	stmt, _, err := v.conn.Prepare(query)
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+
+	stmt.BindInt(1, limit)
+
+	var logs []ShardActivity
+	for stmt.Step() {
+		logs = append(logs, ShardActivity{
+			Timestamp: stmt.ColumnText(0),
+			Type:      stmt.ColumnText(1),
+			Message:   stmt.ColumnText(2),
+			ShardID:   stmt.ColumnText(3),
+		})
+	}
+	return logs, stmt.Err()
+}
+
 func (v *Vessel) CalculateCommunities(ctx context.Context) (int, error) {
 	return 0, nil
 }

@@ -63,8 +63,9 @@ type VizData struct {
 }
 
 type Server struct {
-	vessel   *storage.VesselGraph
-	embedder storage.Embedder
+	vessel      *storage.VesselGraph
+	localVessel *storage.Vessel // For persistent logging (SQLite)
+	embedder    storage.Embedder
 }
 
 func main() {
@@ -77,6 +78,16 @@ func main() {
 	}
 	defer v.Close()
 
+	// Connect to local SQLite for persistent logging
+	dbPath := os.Getenv("DATABASE_PATH")
+	if dbPath == "" {
+		dbPath = "./data/shard-link.db"
+	}
+	lv, err := storage.NewVessel(dbPath)
+	if err != nil {
+		log.Printf("Warning: Failed to init local vessel for logging: %v", err)
+	}
+
 	model := os.Getenv("EMBEDDING_MODEL")
 	if model == "" {
 		model = "gemini-embedding-001"
@@ -87,16 +98,27 @@ func main() {
 	}
 
 	srv := &Server{
-		vessel:   v,
-		embedder: emb,
+		vessel:      v,
+		localVessel: lv,
+		embedder:    emb,
 	}
 
 	storage.GlobalLogger = func(msg string, category string, shardID string) {
-		broadcastActivity(ActivityEntry{
+		entry := ActivityEntry{
 			Message: msg,
 			Type:    category,
 			ShardID: shardID,
-		})
+		}
+		broadcastActivity(entry)
+
+		// Persist to SQLite
+		if srv.localVessel != nil {
+			_ = srv.localVessel.SaveActivity(context.Background(), storage.ShardActivity{
+				Type:    category,
+				Message: msg,
+				ShardID: shardID,
+			})
+		}
 	}
 
 	// 1. Background Analysis (Phase 10: Standalone Intelligence)
@@ -112,9 +134,24 @@ func main() {
 	http.HandleFunc("/api/search", srv.handleSearch)
 	http.HandleFunc("/api/bonds", srv.handleBonds)
 	http.HandleFunc("/api/activity", srv.handleActivity)
+	http.HandleFunc("/api/logs", srv.handleGetLogs)
 
 	log.Printf("Visual Ego Live Dashboard ignited on :8081\n")
 	log.Fatal(http.ListenAndServe(":8081", nil))
+}
+
+func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
+	if s.localVessel == nil {
+		http.Error(w, "Persistent logging not available", 500)
+		return
+	}
+	logs, err := s.localVessel.GetRecentActivity(r.Context(), 50)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(logs)
 }
 
 func (s *Server) handleActivity(w http.ResponseWriter, r *http.Request) {

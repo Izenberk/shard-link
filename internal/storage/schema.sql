@@ -45,3 +45,15 @@ CREATE TABLE IF NOT EXISTS shard_bonds (
 
 CREATE INDEX IF NOT EXISTS idx_shards_janitor ON shards(category, last_used);
 CREATE INDEX IF NOT EXISTS idx_shards_category_core ON shards(category) WHERE category = 'core';
+
+-- THE ACTIVITY LEDGER (Persistent System Events)
+CREATE TABLE IF NOT EXISTS activity_logs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp   DATETIME DEFAULT CURRENT_TIMESTAMP,
+    type        TEXT NOT NULL, -- 'info', 'success', 'bond', 'evict', 'warn'
+    message     TEXT NOT NULL,
+    shard_id    TEXT,
+    metadata    BLOB           -- Optional JSON context
+);
+
+CREATE INDEX IF NOT EXISTS idx_activity_time ON activity_logs(timestamp DESC);

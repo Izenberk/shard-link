@@ -10,6 +10,14 @@ type LogFunc func(msg string, category string, shardID string)
 
 var GlobalLogger LogFunc
 
+// ShardActivity represents a persistent log entry.
+type ShardActivity struct {
+	Timestamp string `json:"timestamp"`
+	Type      string `json:"type"`
+	Message   string `json:"message"`
+	ShardID   string `json:"shard_id"`
+}
+
 // Shard is the atomic unit of long-term memory.
 type Shard struct {
 	ID          string

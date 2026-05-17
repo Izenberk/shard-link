@@ -348,3 +348,25 @@ function clearLogs() {
 
 // Start activity feed on load
 initActivityFeed();
+
+// Log Hydration Implementation
+async function loadPersistentLogs() {
+    try {
+        const resp = await fetch('/api/logs');
+        if (resp.ok) {
+            const history = await resp.json();
+            // history is already sorted by DESC timestamp in SQL
+            // We want to add them from oldest to newest so they appear in correct order
+            history.reverse().forEach(entry => addLogEntry(entry));
+        }
+    } catch (err) {
+        console.error("Failed to load log history:", err);
+    }
+}
+
+// Update the init function to load history
+const originalInitActivity = initActivityFeed;
+initActivityFeed = function() {
+    originalInitActivity();
+    loadPersistentLogs();
+};
