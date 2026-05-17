@@ -182,13 +182,16 @@ func (s *Server) packData(shards []storage.Shard, bonds []storage.ShardBond) Viz
 	}
 
 	for i, s := range shards {
-		// Resilience Fix: Handle zero-value timestamps (0001-01-01)
-		createdAt := s.CreatedAt
-		if createdAt.IsZero() || createdAt.Year() < 2000 {
-			createdAt = time.Now().Add(-1 * time.Hour) // Treat as 1 hour old if invalid
+		// Usage Reinforcement: Survival is based on LastUsed (Recency) rather than Creation
+		lastUsed := s.LastUsed
+		if lastUsed.IsZero() || lastUsed.Year() < 2000 {
+			lastUsed = s.CreatedAt
+			if lastUsed.IsZero() || lastUsed.Year() < 2000 {
+				lastUsed = time.Now().Add(-1 * time.Hour)
+			}
 		}
 
-		hoursSince := time.Since(createdAt).Hours()
+		hoursSince := time.Since(lastUsed).Hours()
 		if hoursSince < 1 {
 			hoursSince = 1
 		}
@@ -215,7 +218,7 @@ func (s *Server) packData(shards []storage.Shard, bonds []storage.ShardBond) Viz
 			Community: s.CommunityID,
 			PageRank:  s.PageRank,
 			Survival:  survival,
-			CreatedAt: createdAt.Format("2006-01-02 15:04:05"),
+			CreatedAt: s.CreatedAt.Format("2006-01-02 15:04:05"),
 		}
 	}
 	for i, b := range bonds {

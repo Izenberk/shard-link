@@ -118,42 +118,71 @@ func (v *Vessel) SaveShard(ctx context.Context, s Shard) error {
 	return nil
 }
 
-// FindResonant searches for shards closest to the query vector.
+// FindResonant searches for shards closest to the query vector and updates their last_used timestamp.
 func (v *Vessel) FindResonant(ctx context.Context, queryVector []byte, limit int) ([]Shard, error) {
-	const query = `
-		SELECT id, category, content, vector, metadata, source_type, source_ref, confidence, last_used, created_at
+	// 1. Find the IDs first
+	const selectQuery = `
+		SELECT id
 		FROM shards
 		ORDER BY vec_distance_cosine(vector, ?) ASC
 		LIMIT ?;
 	`
-	stmt, _, err := v.conn.Prepare(query)
+	stmt, _, err := v.conn.Prepare(selectQuery)
 	if err != nil {
-		return nil, fmt.Errorf("prepare search: %w", err)
+		return nil, fmt.Errorf("prepare search select: %w", err)
 	}
 	defer stmt.Close()
 
 	stmt.BindBlob(1, queryVector)
 	stmt.BindInt(2, limit)
 
-	var shards []Shard
+	var ids []string
 	for stmt.Step() {
-		shards = append(shards, Shard{
-			ID:         stmt.ColumnText(0),
-			Category:   stmt.ColumnText(1),
-			Content:    stmt.ColumnText(2),
-			Vector:     stmt.ColumnBlob(3, nil),
-			Metadata:   stmt.ColumnBlob(4, nil),
-			SourceType: stmt.ColumnText(5),
-			SourceRef:  stmt.ColumnText(6),
-			Confidence: stmt.ColumnFloat(7),
-		})
+		ids = append(ids, stmt.ColumnText(0))
 	}
 
-	if err := stmt.Err(); err != nil {
-		return nil, fmt.Errorf("scan results: %w", err)
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	// 2. Update last_used and return full shard data
+	var shards []Shard
+	for _, id := range ids {
+		const updateQuery = `
+			UPDATE shards 
+			SET last_used = CURRENT_TIMESTAMP 
+			WHERE id = ? 
+			RETURNING id, category, content, vector, metadata, source_type, source_ref, confidence, created_at, last_used;
+		`
+		uStmt, _, err := v.conn.Prepare(updateQuery)
+		if err != nil {
+			return nil, fmt.Errorf("prepare search update: %w", err)
+		}
+		uStmt.BindText(1, id)
+		
+		if uStmt.Step() {
+			shards = append(shards, Shard{
+				ID:         uStmt.ColumnText(0),
+				Category:   uStmt.ColumnText(1),
+				Content:    uStmt.ColumnText(2),
+				Vector:     uStmt.ColumnBlob(3, nil),
+				Metadata:   uStmt.ColumnBlob(4, nil),
+				SourceType: uStmt.ColumnText(5),
+				SourceRef:  uStmt.ColumnText(6),
+				Confidence: uStmt.ColumnFloat(7),
+				CreatedAt:  parseTime(uStmt.ColumnText(8)),
+				LastUsed:   parseTime(uStmt.ColumnText(9)),
+			})
+		}
+		uStmt.Close()
 	}
 
 	return shards, nil
+}
+
+func parseTime(s string) time.Time {
+	t, _ := time.Parse("2006-01-02 15:04:05", s)
+	return t
 }
 
 func (v *Vessel) FindText(ctx context.Context, query string, limit int) ([]Shard, error) {

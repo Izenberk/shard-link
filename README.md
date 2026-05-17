@@ -66,6 +66,7 @@ The system calculates a "Probability of Retention" for every shard:
 3. **Transient Memory (<20):** Candidates for automated eviction (orphans or old data).
 
 Formula: `S = (Density * Centrality * 10) / TimeDecay`
+*Note: TimeDecay is calculated based on **Last Used**, meaning active shards are autonomously reinforced.*
 
 ## 6. Development Philosophy
 - **Active Learning:** Scaffolding provided by Gemini; core logic implemented by Izenberk.

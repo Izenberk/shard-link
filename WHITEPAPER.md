@@ -41,7 +41,7 @@ $$S = \min\left(95, \frac{D \cdot (C + 1.0) \cdot 10}{T}\right)$$
 Where:
 - **D (Neural Density):** Number of active bonds.
 - **C (Relational Centrality):** PageRank score.
-- **T (Time Decay):** Hours since creation (prevents "stale" hubs from dominating).
+- **T (Time Decay):** Hours since last use (Usage Reinforcement). Shards that are frequently retrieved "stay fresh," effectively resetting their decay clock.
 
 **Note:** Core shards are manually set to `S = 100`, making them functionally immortal.
 

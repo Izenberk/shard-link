@@ -59,16 +59,43 @@ func (v *PostgresVessel) SaveShard(ctx context.Context, s Shard) error {
 }
 
 func (v *PostgresVessel) FindResonant(ctx context.Context, queryVector []byte, limit int) ([]Shard, error) {
-	const query = `
-		SELECT id, category, content, vector::text, metadata, source_type, source_ref, confidence
+	// 1. Find the IDs of resonant shards
+	const selectQuery = `
+		SELECT id
 		FROM shards
 		WHERE vector IS NOT NULL
 		ORDER BY vector <=> $1
 		LIMIT $2;
 	`
-	rows, err := v.pool.Query(ctx, query, formatVector(queryVector), limit)
+	rows, err := v.pool.Query(ctx, selectQuery, formatVector(queryVector), limit)
 	if err != nil {
-		return nil, fmt.Errorf("postgres search failed: %w", err)
+		return nil, fmt.Errorf("postgres search select failed: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	// 2. Update last_used and return full shard data
+	const updateQuery = `
+		UPDATE shards 
+		SET last_used = CURRENT_TIMESTAMP
+		WHERE id = ANY($1)
+		RETURNING id, category, content, vector::text, metadata, source_type, source_ref, confidence, created_at, last_used;
+	`
+	rows, err = v.pool.Query(ctx, updateQuery, ids)
+	if err != nil {
+		return nil, fmt.Errorf("postgres search update failed: %w", err)
 	}
 	defer rows.Close()
 
@@ -76,7 +103,7 @@ func (v *PostgresVessel) FindResonant(ctx context.Context, queryVector []byte, l
 	for rows.Next() {
 		var s Shard
 		var vecStr *string 
-		if err := rows.Scan(&s.ID, &s.Category, &s.Content, &vecStr, &s.Metadata, &s.SourceType, &s.SourceRef, &s.Confidence); err != nil {
+		if err := rows.Scan(&s.ID, &s.Category, &s.Content, &vecStr, &s.Metadata, &s.SourceType, &s.SourceRef, &s.Confidence, &s.CreatedAt, &s.LastUsed); err != nil {
 			return nil, err
 		}
 		if vecStr != nil {
