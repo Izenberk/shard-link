@@ -2,7 +2,7 @@ let data = { nodes: [], links: [] };
 let simulation, svg, container, hudLayer, labelLayer, node, link;
 let bondMode = false;
 let selectedNode = null;
-let focusMode = false; // Tracks if we are currently focusing an island/node
+let focusMode = false;
 const width = window.innerWidth;
 const height = window.innerHeight;
 const color = d3.scaleOrdinal(["#5ef3ff", "#00d4ff", "#70a1ff", "#a371f7", "#58a6ff"]);
@@ -18,7 +18,6 @@ function initViz() {
         .attr("height", height)
         .call(zoom)
         .on("click", (event) => {
-            // Background click resets focus
             if (event.target.tagName === 'svg') {
                 resetFocus();
                 closeSidebar();
@@ -143,7 +142,7 @@ function selectNode(d) {
         return;
     }
 
-    focusNode(d); // Apply visual focus
+    focusNode(d);
     
     const sidebar = document.getElementById('details');
     sidebar.classList.add('active');
@@ -159,11 +158,8 @@ function selectNode(d) {
 
 function focusNode(d) {
     focusMode = true;
-    // Dim non-neighbors
     node.style("opacity", n => n.id === d.id || isNeighbor(d, n) ? 1 : 0.05);
     link.style("stroke-opacity", l => (l.source.id === d.id || l.target.id === d.id) ? 0.8 : 0.01);
-    
-    // Highlights the focal node specifically
     node.style("stroke", n => n.id === d.id ? "var(--accent)" : "none");
     node.style("stroke-width", n => n.id === d.id ? "3px" : "0");
 }
@@ -259,13 +255,8 @@ function zoomOut() { svg.transition().duration(300).call(zoom.scaleBy, 0.7); }
 function toggleGlossary() {
     const glossary = document.getElementById('mesh-glossary');
     glossary.classList.toggle('active');
-    
     const btn = document.getElementById('glossary-btn');
-    if (glossary.classList.contains('active')) {
-        btn.innerText = 'HIDE_GLOSSARY';
-    } else {
-        btn.innerText = 'SHOW_GLOSSARY';
-    }
+    btn.innerText = glossary.classList.contains('active') ? 'HIDE_GLOSSARY' : 'SHOW_GLOSSARY';
 }
 
 async function semanticSearch() {
@@ -283,18 +274,9 @@ function dragstarted(event) { if (!event.active) simulation.alphaTarget(0.3).res
 function dragged(event) { event.subject.fx = event.x; event.subject.fy = event.y; }
 function dragended(event) { if (!event.active) simulation.alphaTarget(0); event.subject.fx = null; event.subject.fy = null; }
 
-initViz();
-loadGraph();
+// --- Activity Feed & Logging ---
 
-setInterval(() => {
-    if (!document.getElementById('details').classList.contains('active') && !bondMode && !focusMode) loadGraph();
-}, 15000);
-
-window.addEventListener('resize', () => { svg.attr("width", window.innerWidth).attr("height", window.innerHeight); });
-
-// Activity Feed Implementation
 function initActivityFeed() {
-    const logContainer = document.getElementById('log-container');
     const statusDot = document.getElementById('status-dot');
     const evtSource = new EventSource('/api/activity');
 
@@ -303,13 +285,22 @@ function initActivityFeed() {
         addLogEntry(entry);
     };
 
-    evtSource.onerror = () => {
-        statusDot.classList.add('offline');
-    };
+    evtSource.onerror = () => statusDot.classList.add('offline');
+    evtSource.onopen = () => statusDot.classList.remove('offline');
+    
+    // Hydrate history
+    loadPersistentLogs();
+}
 
-    evtSource.onopen = () => {
-        statusDot.classList.remove('offline');
-    };
+async function loadPersistentLogs() {
+    try {
+        const resp = await fetch('/api/logs');
+        if (resp.ok) {
+            const history = await resp.json();
+            // history is DESC (newest first). Add oldest first to preserve order.
+            history.reverse().forEach(entry => addLogEntry(entry));
+        }
+    } catch (err) { console.error("Log hydration failed:", err); }
 }
 
 function addLogEntry(entry) {
@@ -323,50 +314,30 @@ function addLogEntry(entry) {
     }
 
     container.prepend(div);
-    if (container.children.length > 50) {
-        container.removeChild(container.lastChild);
-    }
+    if (container.children.length > 50) container.removeChild(container.lastChild);
 }
 
 function focusOnShard(id) {
     const d = data.nodes.find(n => n.id === id);
     if (d) {
-        selectNode(null, d);
-        // Center the view on this node
+        selectNode(d);
         const transform = d3.zoomIdentity.translate(width / 2 - d.x, height / 2 - d.y).scale(1.5);
         d3.select('#viz').transition().duration(750).call(zoom.transform, transform);
     } else {
-        // If not in current view, perform a semantic search for it
         document.getElementById('search').value = id;
         semanticSearch();
     }
 }
 
-function clearLogs() {
-    document.getElementById('log-container').innerHTML = '';
-}
+function clearLogs() { document.getElementById('log-container').innerHTML = ''; }
 
-// Start activity feed on load
+// Ignite
+initViz();
+loadGraph();
 initActivityFeed();
 
-// Log Hydration Implementation
-async function loadPersistentLogs() {
-    try {
-        const resp = await fetch('/api/logs');
-        if (resp.ok) {
-            const history = await resp.json();
-            // history is already sorted by DESC timestamp in SQL
-            // We want to add them from oldest to newest so they appear in correct order
-            history.reverse().forEach(entry => addLogEntry(entry));
-        }
-    } catch (err) {
-        console.error("Failed to load log history:", err);
-    }
-}
+setInterval(() => {
+    if (!document.getElementById('details').classList.contains('active') && !bondMode && !focusMode) loadGraph();
+}, 15000);
 
-// Update the init function to load history
-const originalInitActivity = initActivityFeed;
-initActivityFeed = function() {
-    originalInitActivity();
-    loadPersistentLogs();
-};
+window.addEventListener('resize', () => { svg.attr("width", window.innerWidth).attr("height", window.innerHeight); });
