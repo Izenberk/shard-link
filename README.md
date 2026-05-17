@@ -71,7 +71,27 @@ Formula: `S = (Density * Centrality * 10) / TimeDecay`
 - **Active Learning:** Scaffolding provided by Gemini; core logic implemented by Izenberk.
 - **Performance First:** Targeting sub-5ms retrieval via database-side SIMD vector math.
 
-## 7. Security & Authentication Architecture
+## 7. Deployment Modes
+
+Shard-Link supports two primary deployment strategies to balance between maximum privacy and remote accessibility.
+
+### Option A: Pure Local (Privacy First)
+This is the default mode. It runs the entire stack—Neo4j, PostgreSQL, and the Shard-Link Hub—within your local network. No external traffic is permitted.
+- **Connectivity:** All services are bound to `localhost`.
+- **Security:** Naturally protected by your local firewall; no ports are exposed to the internet.
+- **Usage:** Ideal for local-only agents or developers working with highly sensitive private data.
+- **Command:** `docker compose up -d`
+
+### Option B: Secure Online (Remote Hub)
+This mode exposes your Hub to the internet via an encrypted **Cloudflare Tunnel**, allowing remote AI agents to connect to your Knowledge Mesh from anywhere in the world.
+- **Connectivity:** Accessible via a custom domain (e.g., `hub.izenberk.com`).
+- **Mechanism:** Uses an outbound-only connection to Cloudflare's edge; **no router port forwarding is required**.
+- **Prerequisites:** 
+  - A Cloudflare-managed domain.
+  - A `CLOUDFLARE_TUNNEL_TOKEN` (generated in the Cloudflare Zero Trust dashboard) added to your `.env`.
+- **Command:** `docker compose --profile online up -d`
+
+## 8. Security & Authentication Architecture
 
 ### Zero-Proxy Authentication
 Shard-Link implements **Defense in Depth** to ensure security without requiring local sidecar proxies:
@@ -79,7 +99,7 @@ Shard-Link implements **Defense in Depth** to ensure security without requiring 
 2. **The App (Token Middleware):** A required `X-API-Key` header ensures only authorized agents can access the Vessel.
 3. **The Transport (HTTPS):** Encryption-in-transit ensures that tokens cannot be sniffed.
 
-## 8. Documentation & Roadmap
+## 9. Documentation & Roadmap
 - **[Implementation Roadmap (PLAN.md)](./PLAN.md):** Track the phase-by-phase progress of the Hub.
 - **[Improvements Track (IMPROVEMENT.md)](./IMPROVEMENT.md):** Architectural bottlenecks and performance optimization logs.
 - **[Core Context (GEMINI.md)](./GEMINI.md):** Foundational mandates and domain logic for AI agents.
