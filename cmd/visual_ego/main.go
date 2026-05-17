@@ -64,13 +64,15 @@ type VizData struct {
 
 type Server struct {
 	vessel      *storage.VesselGraph
-	localVessel *storage.Vessel // For persistent logging (SQLite)
+	localVessel *storage.Vessel
 	embedder    storage.Embedder
+	bootTime    time.Time
 }
 
 func main() {
 	_ = godotenv.Load()
 	ctx := context.Background()
+	bootTime := time.Now()
 
 	v, err := storage.NewVesselGraph(os.Getenv("NEO4J_URL"), os.Getenv("NEO4J_USER"), os.Getenv("NEO4J_PASS"), "neo4j")
 	if err != nil {
@@ -101,6 +103,7 @@ func main() {
 		vessel:      v,
 		localVessel: lv,
 		embedder:    emb,
+		bootTime:    bootTime,
 	}
 
 	storage.GlobalLogger = func(msg string, category string, shardID string) {
@@ -135,6 +138,9 @@ func main() {
 	http.HandleFunc("/api/bonds", srv.handleBonds)
 	http.HandleFunc("/api/activity", srv.handleActivity)
 	http.HandleFunc("/api/logs", srv.handleGetLogs)
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "OK. Booted: %v", srv.bootTime.Format(time.RFC3339))
+	})
 
 	log.Printf("Visual Ego Live Dashboard ignited on :8081\n")
 	log.Fatal(http.ListenAndServe(":8081", nil))

@@ -51,6 +51,10 @@ func NewMCPServer(v storage.Repository, apiKey string, e storage.Embedder) *MCPS
 
 func (s *MCPServer) withAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Log all incoming requests to debug session/auth issues
+		sessID := r.URL.Query().Get("sessionId")
+		log.Printf("[MCP-HTTP] %s %s (SessID: %s) from %s", r.Method, r.URL.Path, sessID, r.RemoteAddr)
+
 		// Skip auth if no key is configured (local dev only)
 		if s.apiKey == "" {
 			next.ServeHTTP(w, r)
@@ -58,12 +62,11 @@ func (s *MCPServer) withAuth(next http.Handler) http.Handler {
 		}
 
 		if r.Header.Get("X-API-Key") != s.apiKey {
-			log.Printf("[Auth] Denied %s %s from %s (invalid key)", r.Method, r.URL.Path, r.RemoteAddr)
+			log.Printf("[Auth] Denied %s %s (Key Missing/Invalid)", r.Method, r.URL.Path)
 			http.Error(w, "Unauthorized: Invalid Shard Access Key", http.StatusUnauthorized)
 			return
 		}
 
-		// log.Printf("[Auth] Granted %s %s", r.Method, r.URL.Path)
 		next.ServeHTTP(w, r)
 	})
 }

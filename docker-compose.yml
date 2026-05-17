@@ -2,6 +2,7 @@ services:
   hub:
     build: .
     container_name: shard-link_hub
+    profiles: ["online", "local"]
     volumes:
       # This is the "Dual-Boot Bridge"
       - ./data:/app/data
@@ -32,6 +33,7 @@ services:
   db:
     image: pgvector/pgvector:pg17
     container_name: shard-link_db
+    profiles: ["online", "local"]
     ports:
       - "5434:5432"
     environment:
@@ -47,6 +49,7 @@ services:
   neo4j:
     image: neo4j:5.26.0
     container_name: shard-link_graph
+    profiles: ["online", "local"]
     ports:
       - "7474:7474"   # Browser UI
       - "7687:7687"   # Bolt Protocol (Go Driver)
@@ -76,8 +79,8 @@ services:
   tunnel:
     image: cloudflare/cloudflared:latest
     container_name: shard-link_tunnel
-    profiles: ["online"]
-    command: tunnel run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    # Online-First: Tunnel runs by default. 
+    command: tunnel run --token ${CLOUDFLARE_TUNNEL_TOKEN:-dummy_token}
     restart: unless-stopped
     depends_on:
       - hub

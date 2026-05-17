@@ -32,19 +32,20 @@ MESH_LINK_THRESHOLD=0.70
 
 ### 2. Ignite the Hub & Dashboard
 
-#### **Option A: Pure Local (Default)**
+#### **Option A: Secure Online (Default)**
+Running this will start the Hub and the Cloudflare Tunnel automatically.
 ```bash
-# Start Neo4j, Postgres, and the Core Hub
+# Ensure CLOUDFLARE_TUNNEL_TOKEN is in your .env
 docker compose up -d --build
 
 # Start the Visual Ego Dashboard
 go run cmd/visual_ego/main.go
 ```
 
-#### **Option B: Secure Online (With Domain)**
-Use this if you have a Cloudflare Tunnel token configured in your `.env`.
+#### **Option B: Pure Local (Offline)**
+Use this if you want to explicitly disable external access.
 ```bash
-docker compose --profile online up -d --build
+docker compose --profile local up -d --build
 ```
 - **Local Hub:** `http://localhost:8080/sse`
 - **Visual Ego Dashboard:** `http://localhost:8081`
