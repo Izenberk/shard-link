@@ -29,14 +29,22 @@ MESH_LINK_THRESHOLD=0.70
 ```
 
 ### 2. Ignite the Hub & Dashboard
+
+#### **Option A: Pure Local (Default)**
 ```bash
 # Start Neo4j, Postgres, and the Core Hub
 docker compose up -d --build
 
-# Start the Visual Ego Dashboard (Live View)
+# Start the Visual Ego Dashboard
 go run cmd/visual_ego/main.go
 ```
-- **Core Hub:** `http://localhost:8080/sse`
+
+#### **Option B: Secure Online (With Domain)**
+Use this if you have a Cloudflare Tunnel token configured in your `.env`.
+```bash
+docker compose --profile online up -d --build
+```
+- **Local Hub:** `http://localhost:8080/sse`
 - **Visual Ego Dashboard:** `http://localhost:8081`
 - **Neo4j Browser:** `http://localhost:7474` (Credentials: neo4j / shardpass)
 

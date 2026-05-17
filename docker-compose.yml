@@ -76,6 +76,7 @@ services:
   tunnel:
     image: cloudflare/cloudflared:latest
     container_name: shard-link_tunnel
+    profiles: ["online"]
     command: tunnel run --token ${CLOUDFLARE_TUNNEL_TOKEN}
     restart: unless-stopped
     depends_on:
