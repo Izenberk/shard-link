@@ -100,6 +100,7 @@ func (v *VesselGraph) SaveShard(ctx context.Context, s Shard) error {
 	if err != nil {
 		return err
 	}
+	log.Printf("[Vessel] Shard Saved: %s (Category: %s)", s.ID, s.Category)
 
 	// Aha! Moment: Immediate Associative Linking (Phase 11)
 	tStr := os.Getenv("MESH_LINK_THRESHOLD")
@@ -405,6 +406,9 @@ func (v *VesselGraph) ArchiveShard(ctx context.Context, id string) error {
 	query := "MATCH (s:Shard {id: $id}) DETACH DELETE s" // Simple deletion for now
 	_, err := neo4j.ExecuteQuery(ctx, v.driver, query, map[string]any{"id": id}, neo4j.EagerResultTransformer,
 		neo4j.ExecuteQueryWithDatabase(v.dbName))
+	if err == nil {
+		log.Printf("[Vessel] Shard Evicted/Deleted: %s", id)
+	}
 	return err
 }
 
@@ -423,6 +427,9 @@ func (v *VesselGraph) SaveBond(ctx context.Context, b ShardBond) error {
 
 	_, err := neo4j.ExecuteQuery(ctx, v.driver, query, params, neo4j.EagerResultTransformer,
 		neo4j.ExecuteQueryWithDatabase(v.dbName))
+	if err == nil {
+		log.Printf("[Vessel] Bond Forged: %s <-> %s (w: %.2f)", b.FromID, b.ToID, b.Weight)
+	}
 	return err
 }
 
