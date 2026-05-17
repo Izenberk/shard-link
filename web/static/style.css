@@ -282,3 +282,61 @@ h3 { margin: 0 0 15px 0; color: var(--accent); font-size: 11px; letter-spacing: 
 #log-container::-webkit-scrollbar { width: 4px; }
 #log-container::-webkit-scrollbar-track { background: transparent; }
 #log-container::-webkit-scrollbar-thumb { background: var(--panel-border); border-radius: 2px; }
+
+/* Bottom Toolbar */
+#bottom-toolbar {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--panel-bg);
+    backdrop-filter: blur(15px);
+    border: 1px solid var(--panel-border);
+    padding: 10px 20px;
+    border-radius: 50px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    z-index: 1001;
+    box-shadow: 0 5px 25px rgba(0,0,0,0.5);
+}
+
+.toolbar-group {
+    display: flex;
+    gap: 8px;
+}
+
+.tool-btn {
+    color: var(--accent);
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 6px 12px;
+    border-radius: 20px;
+    transition: all 0.2s;
+    user-select: none;
+    border: 1px solid transparent;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.tool-btn:hover {
+    background: rgba(94, 243, 255, 0.15);
+    border-color: var(--panel-border);
+}
+
+.toolbar-divider {
+    width: 1px;
+    height: 20px;
+    background: var(--panel-border);
+}
+
+#bond-mode-btn {
+    font-size: 10px;
+    letter-spacing: 1px;
+}
+
+/* Activity Feed Overlap Fix */
+#activity-feed {
+    bottom: 30px; /* Aligned with toolbar */
+    left: 30px;
+}
