@@ -82,6 +82,8 @@ This document tracks the resolution of architectural bottlenecks and outlines fu
 - **Multi-Vessel Migration:** Eviction now moves shards from the Neo4j "Living Mesh" to the PostgreSQL "Archival Vessel," severing high-cost bonds while preserving the underlying data.
 - **Double-Lock Protection:** Implemented UI-level button hiding and API-level 403 Forbidden rejection to prevent accidental eviction of `core` identity shards.
 - **Dynamic Orbital Physics:** The dashboard now calculates the "Galactic Perimeter" dynamically (Farthest Shard + 300px), ensuring archived White Dwarfs always orbit in a clear, non-overlapping outer system.
+- **Architectural Dashboard Hardening:** Implemented a global **Adjacency Map** and **Position Preservation Layer** in Visual Ego. This eliminates race conditions during rapid selection, provides $O(1)$ neighbor lookups, and ensures the mesh remains stationary during background metric updates, behaving exactly like a manual refresh.
+- **Manual Metric Control:** Introduced the `REFRESH_METRICS` protocol, allowing the user to sync cognitive stats (Survival/PageRank) on-demand while maintaining a stable, pulse-free environment during active inspection.
 
 ---
 *Last Updated: 2026-05-19*
