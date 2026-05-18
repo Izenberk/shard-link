@@ -19,16 +19,15 @@ function initViz() {
         .call(zoom)
         .on("click", (event) => {
             if (event.target.tagName === 'svg') {
-                resetFocus();
                 closeSidebar();
             }
         });
 
     container = svg.append("g");
-    link = container.append("g").selectAll("line");
-    node = container.append("g").selectAll("circle");
-    labelLayer = container.append("g");
-    hudLayer = container.append("g");
+    container.append("g").attr("class", "links-layer");
+    container.append("g").attr("class", "nodes-layer");
+    labelLayer = container.append("g").attr("class", "labels-layer");
+    hudLayer = container.append("g").attr("class", "hud-layer");
 
     simulation = d3.forceSimulation()
         .force("link", d3.forceLink().id(d => d.id).distance(180).strength(0.3))
@@ -116,36 +115,70 @@ async function loadGraph() {
     try {
         const response = await fetch('/api/graph');
         const newData = await response.json();
-        if (newData.nodes.length !== data.nodes.length || newData.links.length !== data.links.length || JSON.stringify(newData.nodes.map(n => n.category)) !== JSON.stringify(data.nodes.map(n => n.category))) {
+        
+        // --- Position Preservation Layer ---
+        // Map existing positions to incoming data to prevent simulation 'reset'
+        const nodeMap = new Map(data.nodes.map(n => [n.id, n]));
+        newData.nodes.forEach(newNode => {
+            const oldNode = nodeMap.get(newNode.id);
+            if (oldNode) {
+                newNode.x = oldNode.x;
+                newNode.y = oldNode.y;
+                newNode.vx = oldNode.vx;
+                newNode.vy = oldNode.vy;
+                newNode.fx = oldNode.fx;
+                newNode.fy = oldNode.fy;
+            }
+        });
+        
+        // 1. Check for Structural Changes (Requires full updateViz)
+        const structureChanged = newData.nodes.length !== data.nodes.length || newData.links.length !== data.links.length;
+        const categoriesChanged = JSON.stringify(newData.nodes.map(n => n.category)) !== JSON.stringify(data.nodes.map(n => n.category));
+        
+        // 2. Check for Metric Changes (Sidebar & Visual properties only)
+        const metricsChanged = JSON.stringify(newData.nodes.map(n => n.survival?.toFixed(1))) !== JSON.stringify(data.nodes.map(n => n.survival?.toFixed(1)));
+
+        if (structureChanged || categoriesChanged) {
             data = newData;
-            updateViz();
+            updateViz(true); // Structural change: Allow pulse to settle new nodes
+        } else if (metricsChanged) {
+            data = newData;
+            updateViz(false); // Metric change: Visual update only, keep mesh stationary
+        }
+
+        // 3. Independent Sidebar Sync
+        const currentID = document.getElementById('det-id').innerText;
+        if (currentID && currentID !== "UNKNOWN") {
+            const updatedNode = data.nodes.find(n => n.id === currentID);
+            if (updatedNode) {
+                document.getElementById('det-survival').innerText = (updatedNode.survival || 0).toFixed(2);
+                document.getElementById('det-rank').innerText = (updatedNode.pagerank || 0).toFixed(4);
+            }
         }
     } catch (err) { console.error(err); }
 }
 
-function updateViz() {
-    const newDegree = {};
+function updateViz(restartSimulation = true) {
+    buildAdjacencyMap();
+    
+    // Reset and recalculate degrees
+    for (let key in degree) delete degree[key];
     data.links.forEach(l => {
         const sID = l.source.id || l.source;
         const tID = l.target.id || l.target;
-        newDegree[sID] = (newDegree[sID] || 0) + 1;
-        newDegree[tID] = (newDegree[tID] || 0) + 1;
+        degree[sID] = (degree[sID] || 0) + 1;
+        degree[tID] = (degree[tID] || 0) + 1;
     });
-    Object.assign(degree, newDegree);
 
-    link = link.data(data.links, d => `${d.source.id || d.source}-${d.target.id || d.target}`)
+    link = container.select("g.links-layer").selectAll("line")
+        .data(data.links, d => `${d.source.id || d.source}-${d.target.id || d.target}`)
         .join("line")
         .attr("class", "link active")
         .style("stroke-width", d => Math.pow(d.weight, 2) * 2 + 1 + "px")
-        .style("stroke-opacity", d => Math.max(0.1, d.weight * 0.35))
-        .on("click", (event, d) => {
-            if (bondMode) {
-                event.stopPropagation();
-                deleteBond(d.source.id || d.source, d.target.id || d.target);
-            }
-        });
+        .style("stroke-opacity", d => Math.max(0.1, d.weight * 0.35));
 
-    node = node.data(data.nodes, d => d.id)
+    node = container.select("g.nodes-layer").selectAll("circle")
+        .data(data.nodes, d => d.id)
         .join(
             enter => enter.append("circle")
                 .attr("class", d => "node " + d.category + (d.category === 'core' ? " core" : ""))
@@ -162,24 +195,34 @@ function updateViz() {
                 .attr("fill", d => d.category === 'core' ? "var(--core-color)" : (d.category === 'archived' ? "#fff" : color(d.community)))
         );
 
+    // ALWAYS sync simulation with current data to prevent divergence
     simulation.nodes(data.nodes);
     simulation.force("link").links(data.links);
-    
-    // Update forces with new center and category logic
-    simulation.force("charge", d3.forceManyBody().strength(d => d.category === 'archived' ? 0 : -1600));
-    simulation.force("center", d3.forceCenter(width / 2, height / 2));
-    simulation.force("x", d3.forceX(width / 2).strength(d => {
-        if (d.category === 'core') return 0.6;
-        if (d.category === 'archived') return 0;
-        return 0.03;
-    }));
-    simulation.force("y", d3.forceY(height / 2).strength(d => {
-        if (d.category === 'core') return 0.6;
-        if (d.category === 'archived') return 0;
-        return 0.03;
-    }));
 
-    simulation.alpha(0.5).restart();
+    if (restartSimulation) {
+        simulation.force("charge", d3.forceManyBody().strength(d => d.category === 'archived' ? 0 : -1600));
+        simulation.force("center", d3.forceCenter(width / 2, height / 2));
+        simulation.force("x", d3.forceX(width / 2).strength(d => {
+            if (d.category === 'core') return 0.6;
+            if (d.category === 'archived') return 0;
+            return 0.03;
+        }));
+        simulation.force("y", d3.forceY(height / 2).strength(d => {
+            if (d.category === 'core') return 0.6;
+            if (d.category === 'archived') return 0;
+            return 0.03;
+        }));
+
+        simulation.alpha(0.5).restart();
+    } else {
+        // Just update positions based on the current alpha without a full restart pulse
+        simulation.alpha(0.01).restart();
+    }
+
+    // Re-apply focus if a node is selected
+    if (focusedNodeID) {
+        focusNode(focusedNodeID);
+    }
 
     if (data.threshold) {
         document.getElementById('stat-t').innerText = data.threshold.toFixed(2);
@@ -202,7 +245,7 @@ function selectNode(d) {
         return;
     }
 
-    focusNode(d);
+    focusNode(d.id);
     
     const sidebar = document.getElementById('details');
     sidebar.classList.add('active');
@@ -244,15 +287,41 @@ window.evictShard = async function() {
     } catch (err) { console.error(err); }
 }
 
-function focusNode(d) {
+const adjMap = new Map();
+
+function buildAdjacencyMap() {
+    adjMap.clear();
+    data.links.forEach(l => {
+        const sID = l.source.id || l.source;
+        const tID = l.target.id || l.target;
+        if (!adjMap.has(sID)) adjMap.set(sID, new Set());
+        if (!adjMap.has(tID)) adjMap.set(tID, new Set());
+        adjMap.get(sID).add(tID);
+        adjMap.get(tID).add(sID);
+    });
+}
+
+function focusNode(id) {
+    if (!id || id === "UNKNOWN") {
+        resetFocus();
+        return;
+    }
+    focusedNodeID = id;
     focusMode = true;
-    node.style("opacity", n => n.id === d.id || isNeighbor(d, n) ? 1 : 0.05);
-    link.style("stroke-opacity", l => (l.source.id === d.id || l.target.id === d.id) ? 0.8 : 0.01);
-    node.style("stroke", n => n.id === d.id ? "var(--accent)" : "none");
-    node.style("stroke-width", n => n.id === d.id ? "3px" : "0");
+    
+    // Apply visibility based on the ID and Adjacency Map
+    node.style("opacity", n => n.id === id || isNeighbor(id, n.id) ? 1 : 0.05);
+    link.style("stroke-opacity", l => {
+        const sID = l.source.id || l.source;
+        const tID = l.target.id || l.target;
+        return (sID === id || tID === id) ? 0.8 : 0.01;
+    });
+    node.style("stroke", n => n.id === id ? "var(--accent)" : "none");
+    node.style("stroke-width", n => n.id === id ? "3px" : "0");
 }
 
 function resetFocus() {
+    focusedNodeID = null;
     focusMode = false;
     node.style("opacity", 1);
     node.style("stroke", "none");
@@ -260,13 +329,9 @@ function resetFocus() {
     labelLayer.selectAll("*").remove();
 }
 
-function isNeighbor(a, b) {
-    return data.links.some(l => 
-        (l.source.id === a.id && l.target.id === b.id) || 
-        (l.target.id === a.id && l.source.id === b.id)
-    );
+function isNeighbor(idA, idB) {
+    return adjMap.get(idA)?.has(idB) || false;
 }
-
 function updateNeighborhoods() {
     const list = document.getElementById('neighborhoods-list');
     list.innerHTML = "";
@@ -330,15 +395,22 @@ async function deleteBond(fromID, toID) {
 
 function drawHUD(d) {
     hudLayer.selectAll("*").remove();
+    if (!d || isNaN(d.x) || isNaN(d.y)) return; // Prevent NaN errors
     const r = d.category === 'core' ? 12 : (degree[d.id] || 0) * 1.5 + 6;
     const boxSize = r * 3.5;
-    hudLayer.append("rect").attr("class", "selection-box").attr("x", d.x - boxSize/2).attr("y", d.y - boxSize/2).attr("width", boxSize).attr("height", boxSize);
+    hudLayer.append("rect")
+        .attr("class", "selection-box")
+        .attr("x", d.x - boxSize/2)
+        .attr("y", d.y - boxSize/2)
+        .attr("width", boxSize)
+        .attr("height", boxSize);
 }
 
 function closeSidebar() {
     document.getElementById('details').classList.remove('active');
     hudLayer.selectAll("*").remove();
     document.getElementById('det-id').innerText = "";
+    resetFocus();
 }
 
 function resetView() { 
@@ -442,6 +514,29 @@ window.addEventListener('resize', () => {
     simulation.force("y", d3.forceY(height / 2).strength(d => d.category === 'core' ? 0.6 : 0.03));
     simulation.alpha(0.3).restart();
 });
+
+window.refreshCurrentMetrics = async function() {
+    const id = document.getElementById('det-id').innerText;
+    if (!id || id === "UNKNOWN") return;
+    
+    try {
+        const response = await fetch('/api/graph');
+        const newData = await response.json();
+        data = newData; // Fully update local state
+        updateViz();
+        
+        const updatedNode = data.nodes.find(n => n.id === id);
+        if (updatedNode) {
+            document.getElementById('det-survival').innerText = (updatedNode.survival || 0).toFixed(2);
+            document.getElementById('det-rank').innerText = (updatedNode.pagerank || 0).toFixed(4);
+            
+            // Temporary flash effect to confirm refresh
+            const scoreEl = document.getElementById('det-survival');
+            scoreEl.style.color = "var(--core-color)";
+            setTimeout(() => scoreEl.style.color = "", 500);
+        }
+    } catch (err) { console.error(err); }
+}
 
 setInterval(() => {
     if (!document.getElementById('details').classList.contains('active') && !bondMode && !focusMode) loadGraph();

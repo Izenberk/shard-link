@@ -176,7 +176,7 @@ func (v *VesselGraph) ReinforceShards(ctx context.Context, ids []string) error {
 	query := `
 	MATCH (s:Shard)
 	WHERE s.id IN $ids
-	SET s.last_used = datetime(),
+	SET s.last_used = toString(datetime()),
 	    s.use_count = coalesce(s.use_count, 0) + 1
 	`
 	_, err := neo4j.ExecuteQuery(ctx, v.driver, query, map[string]any{"ids": ids}, neo4j.EagerResultTransformer,
@@ -355,11 +355,18 @@ func nodeToShard(node neo4j.Node) Shard {
 		conf = float64(c)
 	}
 
-	luStr, _ := props["last_used"].(string)
-	caStr, _ := props["created_at"].(string)
+	var lu, ca time.Time
+	if luVal, ok := props["last_used"].(string); ok {
+		lu, _ = time.Parse(time.RFC3339, luVal)
+	} else if luVal, ok := props["last_used"].(time.Time); ok {
+		lu = luVal
+	}
 
-	lu, _ := time.Parse(time.RFC3339, luStr)
-	ca, _ := time.Parse(time.RFC3339, caStr)
+	if caVal, ok := props["created_at"].(string); ok {
+		ca, _ = time.Parse(time.RFC3339, caVal)
+	} else if caVal, ok := props["created_at"].(time.Time); ok {
+		ca = caVal
+	}
 
 	var useCount int
 	if uc, ok := props["use_count"].(int64); ok {

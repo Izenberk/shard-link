@@ -2,6 +2,7 @@
 <html>
 <head>
     <title>Shard-Link: Visual Ego Live</title>
+    <link rel="icon" href="data:,">
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
@@ -69,6 +70,7 @@
             <div class="detail-field"><span class="detail-label" title="The precise timestamp when this shard was first committed to the Knowledge Mesh.">TEMPORAL_MARK</span> <span class="detail-value" id="det-time"></span></div>
             <div class="detail-field"><span class="detail-label" title="The community ID (neighborhood) this shard belongs to, derived via Louvain clustering.">RELATIONAL_COMMUNITY</span> <span class="detail-value" id="det-comm"></span></div>
             <div class="detail-field" id="evict-container" style="margin-top: 15px; border-top: 1px solid var(--panel-border); padding-top: 15px;">
+                <div class="hud-btn" onclick="refreshCurrentMetrics()" style="margin-bottom: 10px; background: rgba(94, 243, 255, 0.1); border-color: var(--core-color); color: var(--core-color); text-align: center;">REFRESH_METRICS</div>
                 <div class="hud-btn" onclick="evictShard()" style="background: rgba(255, 82, 82, 0.1); border-color: #ff5252; color: #ff5252; text-align: center;">EVICT_SHARD</div>
             </div>
             <div class="detail-field"><span class="detail-label" title="The original text content stored within this shard.">RAW_COGNITIVE_CONTENT</span> <div class="content-box" id="det-content"></div></div>

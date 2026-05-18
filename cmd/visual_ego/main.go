@@ -425,7 +425,7 @@ func (s *Server) packData(shards []storage.Shard, bonds []storage.ShardBond) Viz
 			}
 		}
 
-		links := float64(s.BondCount)
+		links := float64(bondCounts[s.ID])
 		// Score = (Density * Centrality * Vitality * 10) / TimeFactor
 		rawScore := (links * (s.PageRank + 1.0) * 10 * vitality) / hoursSince
 		
