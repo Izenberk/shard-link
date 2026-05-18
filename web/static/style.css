@@ -49,6 +49,12 @@ body {
 .node.core { filter: drop-shadow(0 0 10px var(--core-color)); }
 .node.doc { filter: drop-shadow(0 0 8px var(--doc-glow)); }
 .node.memory { filter: drop-shadow(0 0 5px var(--shard-glow)); }
+.node.archived { 
+    fill: #ffffff; 
+    filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.5)); 
+    stroke: rgba(255, 255, 255, 0.3);
+    stroke-width: 1px;
+}
 
 /* Shard Bloom Effect */
 @keyframes nodeBloom {

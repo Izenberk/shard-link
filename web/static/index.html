@@ -23,6 +23,7 @@
             <h3 title="Visual representation of shard relationships, communities, and centrality.">MESH_TOPOLOGY</h3>
             <div class="legend-item" style="color: var(--core-color)" title="Immutable anchor shards representing your core identity or profile."><div class="legend-color" style="background: var(--core-color); box-shadow: 0 0 8px var(--core-color)"></div> IDENTITY_ANCHOR</div>
             <div class="legend-item" style="color: var(--doc-glow)" title="Non-core shards containing general knowledge or project data."><div class="legend-color" style="background: var(--doc-glow); box-shadow: 0 0 8px var(--doc-glow)"></div> SYSTEM_KNOWLEDGE</div>
+            <div class="legend-item" style="color: #ffffff" title="Evicted shards stored in the Archival Vessel. Displayed as small white dwarfs in the outer system."><div class="legend-color" style="background: #ffffff; box-shadow: 0 0 8px rgba(255, 255, 255, 0.6)"></div> ARCHIVED_MEMORY</div>
             <div class="legend-item" style="color: #5ef3ff" title="A group of shards with high internal connectivity, indicating a specific topic."><div class="legend-color" style="background: #5ef3ff; box-shadow: 0 0 8px #5ef3ff"></div> SEMANTIC_COMMUNITY</div>
             
             <div style="margin-top: 20px;">
@@ -67,6 +68,9 @@
             <div class="detail-field"><span class="detail-label" title="Estimated survival score based on centrality, density, and age. Low scores are targeted for eviction.">SURVIVAL_SCORE</span> <span class="detail-value" id="det-survival">--</span></div>
             <div class="detail-field"><span class="detail-label" title="The precise timestamp when this shard was first committed to the Knowledge Mesh.">TEMPORAL_MARK</span> <span class="detail-value" id="det-time"></span></div>
             <div class="detail-field"><span class="detail-label" title="The community ID (neighborhood) this shard belongs to, derived via Louvain clustering.">RELATIONAL_COMMUNITY</span> <span class="detail-value" id="det-comm"></span></div>
+            <div class="detail-field" id="evict-container" style="margin-top: 15px; border-top: 1px solid var(--panel-border); padding-top: 15px;">
+                <div class="hud-btn" onclick="evictShard()" style="background: rgba(255, 82, 82, 0.1); border-color: #ff5252; color: #ff5252; text-align: center;">EVICT_SHARD</div>
+            </div>
             <div class="detail-field"><span class="detail-label" title="The original text content stored within this shard.">RAW_COGNITIVE_CONTENT</span> <div class="content-box" id="det-content"></div></div>
         </div>
     </div>

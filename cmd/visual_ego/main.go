@@ -65,10 +65,11 @@ type VizData struct {
 }
 
 type Server struct {
-	vessel      *storage.VesselGraph
-	localVessel *storage.Vessel
-	embedder    storage.Embedder
-	bootTime    time.Time
+	vessel         *storage.VesselGraph
+	localVessel    *storage.Vessel
+	archivalVessel *storage.PostgresVessel
+	embedder       storage.Embedder
+	bootTime       time.Time
 }
 
 func main() {
@@ -81,6 +82,35 @@ func main() {
 		log.Fatal(err)
 	}
 	defer v.Close()
+
+	// Connect to Postgres Archival Vessel
+	pgURL := os.Getenv("POSTGRES_URL")
+	if pgURL == "" {
+		// Construct from components if available, with local-dev defaults
+		user := os.Getenv("DB_USER")
+		if user == "" { user = "sharduser" }
+		pass := os.Getenv("DB_PASSWORD")
+		if pass == "" { pass = "shardpass" }
+		host := os.Getenv("DB_HOST")
+		if host == "db" || host == "" { host = "localhost" } // Fallback to localhost if "db" is provided but we are local
+		port := os.Getenv("DB_PORT")
+		if port == "5432" || port == "" { port = "5434" } // Map to the docker-exposed port 5434
+		dbName := os.Getenv("DB_NAME")
+		if dbName == "" { dbName = "shardlink" }
+		
+		pgURL = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", user, pass, host, port, dbName)
+	}
+
+	var av *storage.PostgresVessel
+	if pgURL != "" {
+		log.Printf("[Init] Connecting to Archival Vessel: %s", pgURL)
+		av, err = storage.NewPostgresVessel(ctx, pgURL)
+		if err != nil {
+			log.Printf("Warning: Failed to connect to Postgres Archival Vessel: %v", err)
+		} else {
+			defer av.Close()
+		}
+	}
 
 	// Connect to local SQLite for persistent logging
 	dbPath := os.Getenv("DATABASE_PATH")
@@ -102,10 +132,11 @@ func main() {
 	}
 
 	srv := &Server{
-		vessel:      v,
-		localVessel: lv,
-		embedder:    emb,
-		bootTime:    bootTime,
+		vessel:         v,
+		localVessel:    lv,
+		archivalVessel: av,
+		embedder:       emb,
+		bootTime:       bootTime,
 	}
 
 	storage.GlobalLogger = func(msg string, category string, shardID string) {
@@ -140,12 +171,63 @@ func main() {
 	http.HandleFunc("/api/bonds", srv.handleBonds)
 	http.HandleFunc("/api/activity", srv.handleActivity)
 	http.HandleFunc("/api/logs", srv.handleGetLogs)
+	http.HandleFunc("/api/evict", srv.handleEvict)
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "OK. Booted: %v", srv.bootTime.Format(time.RFC3339))
 	})
 
 	log.Printf("Visual Ego Live Dashboard ignited on :8081\n")
 	log.Fatal(http.ListenAndServe(":8081", nil))
+}
+
+func (s *Server) handleEvict(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		http.Error(w, "Shard ID required", 400)
+		return
+	}
+
+	log.Printf("[API] Manual Eviction Request: %s", id)
+
+	// 1. Get full shard data from Mesh
+	shard, err := s.vessel.GetShardByID(r.Context(), id)
+	if err != nil {
+		log.Printf("[API ERROR] Shard %s not found in Mesh: %v", id, err)
+		http.Error(w, "Shard not found in Living Memory", 404)
+		return
+	}
+
+	// 1b. Immutable Protection: Core shards cannot be evicted
+	if shard.Category == "core" {
+		log.Printf("[API WARN] Blocked eviction attempt of CORE shard: %s", id)
+		http.Error(w, "Immutable Protection: CORE shards cannot be evicted.", http.StatusForbidden)
+		return
+	}
+
+	// 2. Move to Archival Vessel (Postgres)
+	if s.archivalVessel != nil {
+		shard.Category = "archived" // Mark as White Dwarf
+		// Use the dedicated ArchiveShard method which handles the move to shards_archive
+		if err := s.archivalVessel.SaveArchivedShard(r.Context(), shard); err != nil {
+			log.Printf("[API ERROR] Failed to move shard %s to Archival Vessel: %v", id, err)
+			http.Error(w, "Archival transition failed", 500)
+			return
+		}
+	}
+
+	// 3. Remove from Mesh (Neo4j)
+	if err := s.vessel.ArchiveShard(r.Context(), id); err != nil {
+		log.Printf("[API ERROR] Failed to evict shard %s: %v", id, err)
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
@@ -254,6 +336,17 @@ func (s *Server) handleGetGraph(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
+
+	// Fetch Archived Shards from Postgres
+	if s.archivalVessel != nil {
+		archived, err := s.archivalVessel.GetArchivedShards(ctx)
+		if err != nil {
+			log.Printf("[API WARN] Failed to fetch archived shards: %v", err)
+		} else {
+			shards = append(shards, archived...)
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(s.packData(shards, bonds))
 }
@@ -273,7 +366,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shards, bonds, err := s.vessel.SearchGraph(r.Context(), storage.EncodeVector(floats), 20)
+	shards, bonds, err := s.vessel.SearchGraph(r.Context(), storage.EncodeVector(floats), 20, true)
 	if err != nil {
 		log.Printf("[API ERROR] SearchGraph failed: %v", err)
 		http.Error(w, "Search failed", 500)

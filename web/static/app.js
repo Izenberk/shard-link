@@ -3,8 +3,8 @@ let simulation, svg, container, hudLayer, labelLayer, node, link;
 let bondMode = false;
 let selectedNode = null;
 let focusMode = false;
-const width = window.innerWidth;
-const height = window.innerHeight;
+let width = window.innerWidth;
+let height = window.innerHeight;
 const color = d3.scaleOrdinal(["#5ef3ff", "#00d4ff", "#70a1ff", "#a371f7", "#58a6ff"]);
 const degree = {};
 
@@ -32,12 +32,24 @@ function initViz() {
 
     simulation = d3.forceSimulation()
         .force("link", d3.forceLink().id(d => d.id).distance(180).strength(0.3))
-        .force("charge", d3.forceManyBody().strength(-1600)) 
+        .force("charge", d3.forceManyBody().strength(d => d.category === 'archived' ? 0 : -1600)) 
         .force("center", d3.forceCenter(width / 2, height / 2))
-        .force("collision", d3.forceCollide().radius(d => (degree[d.id] || 0) * 2 + 45))
+        .force("collision", d3.forceCollide().radius(d => {
+            if (d.category === 'archived') return 10;
+            return (degree[d.id] || 0) * 2 + 45;
+        }))
         .force("cluster", forceCluster)
-        .force("x", d3.forceX(width / 2).strength(d => d.category === 'core' ? 0.6 : 0.03))
-        .force("y", d3.forceY(height / 2).strength(d => d.category === 'core' ? 0.6 : 0.03));
+        .force("archival", forceArchival) // Orbit outer system
+        .force("x", d3.forceX(width / 2).strength(d => {
+            if (d.category === 'core') return 0.6;
+            if (d.category === 'archived') return 0;
+            return 0.03;
+        }))
+        .force("y", d3.forceY(height / 2).strength(d => {
+            if (d.category === 'core') return 0.6;
+            if (d.category === 'archived') return 0;
+            return 0.03;
+        }));
 
     simulation.on("tick", () => {
         link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
@@ -66,8 +78,37 @@ function forceCluster(alpha) {
     }
     data.nodes.forEach(n => {
         const c = centroids[n.community];
-        n.vx += (c.x - n.x) * alpha * 0.15;
-        n.vy += (c.y - n.y) * alpha * 0.15;
+        if (c) {
+            n.vx += (c.x - n.x) * alpha * 0.15;
+            n.vy += (c.y - n.y) * alpha * 0.15;
+        }
+    });
+}
+
+function forceArchival(alpha) {
+    // Dynamic Orbital Radius: Find the farthest ACTIVE shard and add padding
+    let maxActiveDist = 400; // Minimum baseline
+    data.nodes.forEach(n => {
+        if (n.category !== 'archived') {
+            const dx = n.x - width / 2;
+            const dy = n.y - height / 2;
+            const d = Math.sqrt(dx * dx + dy * dy);
+            if (d > maxActiveDist) maxActiveDist = d;
+        }
+    });
+
+    const orbitalRadius = maxActiveDist + 300; // Padding to ensure clear separation
+    
+    data.nodes.forEach(n => {
+        if (n.category === 'archived') {
+            const dx = n.x - width / 2;
+            const dy = n.y - height / 2;
+            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+            const strength = 0.8; // High precision pull
+            
+            n.vx += (dx / dist) * (orbitalRadius - dist) * alpha * strength;
+            n.vy += (dy / dist) * (orbitalRadius - dist) * alpha * strength;
+        }
     });
 }
 
@@ -75,7 +116,7 @@ async function loadGraph() {
     try {
         const response = await fetch('/api/graph');
         const newData = await response.json();
-        if (newData.nodes.length !== data.nodes.length || newData.links.length !== data.links.length) {
+        if (newData.nodes.length !== data.nodes.length || newData.links.length !== data.links.length || JSON.stringify(newData.nodes.map(n => n.category)) !== JSON.stringify(data.nodes.map(n => n.category))) {
             data = newData;
             updateViz();
         }
@@ -108,21 +149,37 @@ function updateViz() {
         .join(
             enter => enter.append("circle")
                 .attr("class", d => "node " + d.category + (d.category === 'core' ? " core" : ""))
-                .attr("r", d => d.category === 'core' ? 12 : (degree[d.id] || 0) * 1.5 + 6)
-                .attr("fill", d => d.category === 'core' ? "var(--core-color)" : color(d.community))
+                .attr("r", d => d.category === 'core' ? 12 : (d.category === 'archived' ? 4 : (degree[d.id] || 0) * 1.5 + 6))
+                .attr("fill", d => d.category === 'core' ? "var(--core-color)" : (d.category === 'archived' ? "#fff" : color(d.community)))
                 .on("click", (event, d) => {
                     event.stopPropagation();
                     selectNode(d);
                 })
                 .call(d3.drag().on("start", dragstarted).on("drag", dragged).on("end", dragended)),
             update => update
-                .attr("r", d => d.category === 'core' ? 12 : (degree[d.id] || 0) * 1.5 + 6)
-                .attr("fill", d => d.category === 'core' ? "var(--core-color)" : color(d.community))
+                .attr("class", d => "node " + d.category + (d.category === 'core' ? " core" : ""))
+                .attr("r", d => d.category === 'core' ? 12 : (d.category === 'archived' ? 4 : (degree[d.id] || 0) * 1.5 + 6))
+                .attr("fill", d => d.category === 'core' ? "var(--core-color)" : (d.category === 'archived' ? "#fff" : color(d.community)))
         );
 
     simulation.nodes(data.nodes);
     simulation.force("link").links(data.links);
-    simulation.alpha(0.3).restart();
+    
+    // Update forces with new center and category logic
+    simulation.force("charge", d3.forceManyBody().strength(d => d.category === 'archived' ? 0 : -1600));
+    simulation.force("center", d3.forceCenter(width / 2, height / 2));
+    simulation.force("x", d3.forceX(width / 2).strength(d => {
+        if (d.category === 'core') return 0.6;
+        if (d.category === 'archived') return 0;
+        return 0.03;
+    }));
+    simulation.force("y", d3.forceY(height / 2).strength(d => {
+        if (d.category === 'core') return 0.6;
+        if (d.category === 'archived') return 0;
+        return 0.03;
+    }));
+
+    simulation.alpha(0.5).restart();
 
     if (data.threshold) {
         document.getElementById('stat-t').innerText = data.threshold.toFixed(2);
@@ -156,7 +213,35 @@ function selectNode(d) {
     document.getElementById('det-time').innerText = d.created_at || "--";
     document.getElementById('det-comm').innerText = d.community !== undefined ? "N_" + d.community : "N_NONE";
     document.getElementById('det-content').innerText = d.content || "NO_CONTENT";
+
+    // Core and Archived shards cannot be manually evicted
+    const evictBtn = document.getElementById('evict-container');
+    if (evictBtn) {
+        if (d.category === 'core' || d.category === 'archived') {
+            evictBtn.style.display = 'none';
+        } else {
+            evictBtn.style.display = 'block';
+        }
+    }
+
     drawHUD(d);
+}
+
+window.evictShard = async function() {
+    const id = document.getElementById('det-id').innerText;
+    if (!id) return;
+    if (!confirm(`Permanently evict shard ${id} from the Knowledge Mesh?`)) return;
+
+    try {
+        const resp = await fetch(`/api/evict?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+        if (resp.ok) {
+            closeSidebar();
+            setTimeout(loadGraph, 500);
+        } else {
+            const err = await resp.text();
+            alert(`Eviction failed: ${err}`);
+        }
+    } catch (err) { console.error(err); }
 }
 
 function focusNode(d) {
@@ -217,6 +302,14 @@ function toggleBondMode() {
 }
 
 async function createBond(fromID, toID) {
+    const fromShard = data.nodes.find(n => n.id === fromID);
+    const targetShard = data.nodes.find(n => n.id === toID);
+    
+    if (fromShard?.category === 'archived' || targetShard?.category === 'archived') {
+        alert("ACTION_DENIED: Cannot forge bonds with archived memory (White Dwarfs).");
+        return;
+    }
+
     try {
         const resp = await fetch('/api/bonds', {
             method: 'POST',
@@ -308,6 +401,7 @@ async function loadPersistentLogs() {
 
 function addLogEntry(entry) {
     const container = document.getElementById('log-container');
+    if (!container) return;
     const div = document.createElement('div');
     div.className = 'log-entry';
     div.innerHTML = `<span class="log-time">[${entry.timestamp}]</span> <span class="log-type-${entry.type}">${entry.message}</span>`;
@@ -339,8 +433,16 @@ initViz();
 loadGraph();
 initActivityFeed();
 
+window.addEventListener('resize', () => { 
+    width = window.innerWidth;
+    height = window.innerHeight;
+    svg.attr("width", width).attr("height", height); 
+    simulation.force("center", d3.forceCenter(width / 2, height / 2));
+    simulation.force("x", d3.forceX(width / 2).strength(d => d.category === 'core' ? 0.6 : 0.03));
+    simulation.force("y", d3.forceY(height / 2).strength(d => d.category === 'core' ? 0.6 : 0.03));
+    simulation.alpha(0.3).restart();
+});
+
 setInterval(() => {
     if (!document.getElementById('details').classList.contains('active') && !bondMode && !focusMode) loadGraph();
 }, 15000);
-
-window.addEventListener('resize', () => { svg.attr("width", window.innerWidth).attr("height", window.innerHeight); });
