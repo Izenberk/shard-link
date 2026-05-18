@@ -120,8 +120,8 @@ func (v *Vessel) SaveShard(ctx context.Context, s Shard) error {
 	return nil
 }
 
-// FindResonant searches for shards closest to the query vector and updates their last_used timestamp.
-func (v *Vessel) FindResonant(ctx context.Context, queryVector []byte, limit int) ([]Shard, error) {
+// FindResonant searches for shards closest to the query vector and conditionally updates their last_used timestamp.
+func (v *Vessel) FindResonant(ctx context.Context, queryVector []byte, limit int, shouldTouch bool) ([]Shard, error) {
 	// 1. Find the IDs first
 	const selectQuery = `
 		SELECT id
@@ -147,18 +147,28 @@ func (v *Vessel) FindResonant(ctx context.Context, queryVector []byte, limit int
 		return nil, nil
 	}
 
-	// 2. Update last_used and return full shard data
+	// 2. Conditionally update last_used and return full shard data
 	var shards []Shard
 	for _, id := range ids {
-		const updateQuery = `
-			UPDATE shards 
-			SET last_used = CURRENT_TIMESTAMP 
-			WHERE id = ? 
-			RETURNING id, category, content, vector, metadata, source_type, source_ref, confidence, created_at, last_used;
-		`
-		uStmt, _, err := v.conn.Prepare(updateQuery)
+		var sql string
+		if shouldTouch {
+			sql = `
+				UPDATE shards 
+				SET last_used = CURRENT_TIMESTAMP 
+				WHERE id = ? 
+				RETURNING id, category, content, vector, metadata, source_type, source_ref, confidence, created_at, last_used;
+			`
+		} else {
+			sql = `
+				SELECT id, category, content, vector, metadata, source_type, source_ref, confidence, created_at, last_used
+				FROM shards 
+				WHERE id = ?;
+			`
+		}
+
+		uStmt, _, err := v.conn.Prepare(sql)
 		if err != nil {
-			return nil, fmt.Errorf("prepare search update: %w", err)
+			return nil, fmt.Errorf("prepare search retrieval: %w", err)
 		}
 		uStmt.BindText(1, id)
 		
@@ -187,7 +197,7 @@ func parseTime(s string) time.Time {
 	return t
 }
 
-func (v *Vessel) FindText(ctx context.Context, query string, limit int) ([]Shard, error) {
+func (v *Vessel) FindText(ctx context.Context, query string, limit int, shouldTouch bool) ([]Shard, error) {
 	const sqlQuery = `
 		SELECT id, category, content, vector, metadata, source_type, source_ref, confidence, last_used, created_at
 		FROM shards
@@ -205,7 +215,129 @@ func (v *Vessel) FindText(ctx context.Context, query string, limit int) ([]Shard
 	stmt.BindInt(2, limit)
 
 	var shards []Shard
+	var ids []string
 	for stmt.Step() {
+		shard := Shard{
+			ID:         stmt.ColumnText(0),
+			Category:   stmt.ColumnText(1),
+			Content:    stmt.ColumnText(2),
+			Vector:     stmt.ColumnBlob(3, nil),
+			Metadata:   stmt.ColumnBlob(4, nil),
+			SourceType: stmt.ColumnText(5),
+			SourceRef:  stmt.ColumnText(6),
+			Confidence: stmt.ColumnFloat(7),
+		}
+		shards = append(shards, shard)
+		ids = append(ids, shard.ID)
+	}
+
+	if err := stmt.Err(); err != nil {
+		return nil, fmt.Errorf("scan text results: %w", err)
+	}
+
+	if shouldTouch && len(ids) > 0 {
+		_ = v.ReinforceShards(ctx, ids)
+	}
+
+	return shards, nil
+}
+
+// ReinforceShards manually updates usage metrics for a list of shard IDs.
+func (v *Vessel) ReinforceShards(ctx context.Context, ids []string) error {
+	for _, id := range ids {
+		stmt, _, err := v.conn.Prepare("UPDATE shards SET last_used = CURRENT_TIMESTAMP WHERE id = ?")
+		if err != nil {
+			return err
+		}
+		stmt.BindText(1, id)
+		_ = stmt.Exec()
+		stmt.Close()
+	}
+	return nil
+}
+
+
+// FindHybrid performs Reciprocal Rank Fusion (RRF) on vector and text search results.
+func (v *Vessel) FindHybrid(ctx context.Context, textQuery string, queryVector []byte, limit int) ([]Shard, error) {
+	candidateLimit := limit * 2
+
+	vectorResults, err := v.FindResonant(ctx, queryVector, candidateLimit, true)
+	if err != nil {
+		return nil, fmt.Errorf("vector search failed in hybrid: %w", err)
+	}
+
+	textResults, err := v.FindText(ctx, textQuery, candidateLimit, true)
+	if err != nil {
+		return nil, fmt.Errorf("text search failed in hybrid: %w", err)
+	}
+
+	return ReciprocalRankFusion(limit, 60.0, vectorResults, textResults), nil
+}
+
+func (v *Vessel) GetShardByID(ctx context.Context, id string) (Shard, error) {
+	const sql = `SELECT id, category, content, vector, metadata, source_type, source_ref, confidence, created_at, last_used FROM shards WHERE id = ?`
+	stmt, _, err := v.conn.Prepare(sql)
+	if err != nil {
+		return Shard{}, err
+	}
+	defer stmt.Close()
+	stmt.BindText(1, id)
+
+	if stmt.Step() {
+		return Shard{
+			ID:         stmt.ColumnText(0),
+			Category:   stmt.ColumnText(1),
+			Content:    stmt.ColumnText(2),
+			Vector:     stmt.ColumnBlob(3, nil),
+			Metadata:   stmt.ColumnBlob(4, nil),
+			SourceType: stmt.ColumnText(5),
+			SourceRef:  stmt.ColumnText(6),
+			Confidence: stmt.ColumnFloat(7),
+			CreatedAt:  parseTime(stmt.ColumnText(8)),
+			LastUsed:   parseTime(stmt.ColumnText(9)),
+		}, nil
+	}
+
+	// Try archive fallback
+	const arcSql = `SELECT id, category, content, vector, metadata, source_type, source_ref, confidence, created_at, last_used FROM shards_archive WHERE id = ?`
+	aStmt, _, err := v.conn.Prepare(arcSql)
+	if err != nil {
+		return Shard{}, err
+	}
+	defer aStmt.Close()
+	aStmt.BindText(1, id)
+
+	if aStmt.Step() {
+		return Shard{
+			ID:         aStmt.ColumnText(0),
+			Category:   aStmt.ColumnText(1),
+			Content:    aStmt.ColumnText(2),
+			Vector:     aStmt.ColumnBlob(3, nil),
+			Metadata:   aStmt.ColumnBlob(4, nil),
+			SourceType: aStmt.ColumnText(5),
+			SourceRef:  aStmt.ColumnText(6),
+			Confidence: aStmt.ColumnFloat(7),
+			CreatedAt:  parseTime(aStmt.ColumnText(8)),
+			LastUsed:   parseTime(aStmt.ColumnText(9)),
+		}, nil
+	}
+
+	return Shard{}, fmt.Errorf("shard %s not found in sqlite", id)
+}
+
+func (v *Vessel) GetArchivedShards(ctx context.Context) ([]Shard, error) {
+	const query = `SELECT id, category, content, vector, metadata, source_type, source_ref, confidence, last_used, created_at FROM shards_archive`
+	stmt, _, err := v.conn.Prepare(query)
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+
+	var shards []Shard
+	for stmt.Step() {
+		lu, _ := time.Parse(time.RFC3339, stmt.ColumnText(8))
+		ca, _ := time.Parse(time.RFC3339, stmt.ColumnText(9))
+
 		shards = append(shards, Shard{
 			ID:         stmt.ColumnText(0),
 			Category:   stmt.ColumnText(1),
@@ -215,31 +347,11 @@ func (v *Vessel) FindText(ctx context.Context, query string, limit int) ([]Shard
 			SourceType: stmt.ColumnText(5),
 			SourceRef:  stmt.ColumnText(6),
 			Confidence: stmt.ColumnFloat(7),
+			LastUsed:   lu,
+			CreatedAt:  ca,
 		})
 	}
-
-	if err := stmt.Err(); err != nil {
-		return nil, fmt.Errorf("scan text results: %w", err)
-	}
-
-	return shards, nil
-}
-
-// FindHybrid performs Reciprocal Rank Fusion (RRF) on vector and text search results.
-func (v *Vessel) FindHybrid(ctx context.Context, textQuery string, queryVector []byte, limit int) ([]Shard, error) {
-	candidateLimit := limit * 2
-
-	vectorResults, err := v.FindResonant(ctx, queryVector, candidateLimit)
-	if err != nil {
-		return nil, fmt.Errorf("vector search failed in hybrid: %w", err)
-	}
-
-	textResults, err := v.FindText(ctx, textQuery, candidateLimit)
-	if err != nil {
-		return nil, fmt.Errorf("text search failed in hybrid: %w", err)
-	}
-
-	return ReciprocalRankFusion(limit, 60.0, vectorResults, textResults), nil
+	return shards, stmt.Err()
 }
 
 func (v *Vessel) GetCoreShards(ctx context.Context) ([]Shard, error) {
@@ -405,9 +517,9 @@ func (v *Vessel) GetAllBonds(ctx context.Context) ([]ShardBond, error) {
 	return bonds, stmt.Err()
 }
 
-func (v *Vessel) SearchGraph(ctx context.Context, queryVector []byte, limit int) ([]Shard, []ShardBond, error) {
+func (v *Vessel) SearchGraph(ctx context.Context, queryVector []byte, limit int, shouldTouch bool) ([]Shard, []ShardBond, error) {
 	// SQLite fallback to vector search
-	shards, err := v.FindResonant(ctx, queryVector, limit)
+	shards, err := v.FindResonant(ctx, queryVector, limit, shouldTouch)
 	return shards, nil, err
 }
 

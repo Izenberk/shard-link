@@ -107,13 +107,15 @@ func (v *VesselGraph) SaveShard(ctx context.Context, s Shard) error {
 	tStr := os.Getenv("MESH_LINK_THRESHOLD")
 	threshold, err := strconv.ParseFloat(tStr, 64)
 	if err != nil {
-		threshold = 0.70
+		threshold = 0.75
 	}
 
 	linkQuery := `
 	MATCH (new:Shard {id: $id})
 	MATCH (existing:Shard)
 	WHERE new.id <> existing.id
+	  AND new.category <> 'archived'
+	  AND existing.category <> 'archived'
 	  AND size(existing.embedding) = 3072
 	WITH new, existing, gds.similarity.cosine(new.embedding, existing.embedding) AS sim
 	WHERE sim > $threshold
@@ -128,14 +130,23 @@ func (v *VesselGraph) SaveShard(ctx context.Context, s Shard) error {
 	return nil
 }
 
-func (v *VesselGraph) FindResonant(ctx context.Context, queryVector []byte, limit int) ([]Shard, error) {
-	query := `
-	CALL db.index.vector.queryNodes('shard_embeddings', $limit, $vector)
-	YIELD node, score
-	SET node.last_used = datetime(),
-	    node.use_count = coalesce(node.use_count, 0) + 1
-	RETURN node
-	`
+func (v *VesselGraph) FindResonant(ctx context.Context, queryVector []byte, limit int, shouldTouch bool) ([]Shard, error) {
+	var query string
+	if shouldTouch {
+		query = `
+		CALL db.index.vector.queryNodes('shard_embeddings', $limit, $vector)
+		YIELD node, score
+		SET node.last_used = datetime(),
+			node.use_count = coalesce(node.use_count, 0) + 1
+		RETURN node
+		`
+	} else {
+		query = `
+		CALL db.index.vector.queryNodes('shard_embeddings', $limit, $vector)
+		YIELD node, score
+		RETURN node
+		`
+	}
 
 	params := map[string]any{
 		"limit":  limit,
@@ -155,6 +166,24 @@ func (v *VesselGraph) FindResonant(ctx context.Context, queryVector []byte, limi
 	}
 	return shards, nil
 }
+
+// ReinforceShards manually updates usage metrics for a list of shard IDs.
+// This prevents "double-touching" during meta-tool operations.
+func (v *VesselGraph) ReinforceShards(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	query := `
+	MATCH (s:Shard)
+	WHERE s.id IN $ids
+	SET s.last_used = datetime(),
+	    s.use_count = coalesce(s.use_count, 0) + 1
+	`
+	_, err := neo4j.ExecuteQuery(ctx, v.driver, query, map[string]any{"ids": ids}, neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithDatabase(v.dbName))
+	return err
+}
+
 
 // GetEvictionCandidates identifies "Orphan" shards (low centrality/links) using PageRank
 func (v *VesselGraph) GetEvictionCandidates(ctx context.Context, limit int) ([]string, error) {
@@ -404,14 +433,16 @@ func (v *VesselGraph) GetCount(ctx context.Context) (int, error) {
 }
 
 func (v *VesselGraph) ArchiveShard(ctx context.Context, id string) error {
-	query := "MATCH (s:Shard {id: $id}) DETACH DELETE s" // Simple deletion for now
+	// Note: In the Triple-Engine model, the caller is responsible for moving 
+	// data to Postgres before calling this to remove it from the "Living Mesh" (Neo4j).
+	query := "MATCH (s:Shard {id: $id}) DETACH DELETE s"
 	_, err := neo4j.ExecuteQuery(ctx, v.driver, query, map[string]any{"id": id}, neo4j.EagerResultTransformer,
 		neo4j.ExecuteQueryWithDatabase(v.dbName))
 	if err == nil {
 		if GlobalLogger != nil {
 			GlobalLogger(fmt.Sprintf("Shard Evicted: %s", id), "evict", id)
 		}
-		log.Printf("[Vessel] Shard Evicted/Deleted: %s", id)
+		log.Printf("[Vessel] Shard Evicted/Deleted from Mesh: %s", id)
 	}
 	return err
 }
@@ -488,15 +519,28 @@ func (v *VesselGraph) GetAllShards(ctx context.Context) ([]Shard, error) {
 	return shards, nil
 }
 
-func (v *VesselGraph) FindText(ctx context.Context, query string, limit int) ([]Shard, error) {
+func (v *VesselGraph) FindText(ctx context.Context, query string, limit int, shouldTouch bool) ([]Shard, error) {
 	// Super Senior Update: Use Full-Text Index instead of rigid CONTAINS
 	// This handles tokenization, case-insensitivity, and ranking.
-	cypher := `
-	CALL db.index.fulltext.queryNodes('shard_content_ft', $query)
-	YIELD node, score
-	RETURN node
-	LIMIT $limit
-	`
+	// Unified Reinforcement: Update usage metrics so keyword search counts as a "touch".
+	var cypher string
+	if shouldTouch {
+		cypher = `
+		CALL db.index.fulltext.queryNodes('shard_content_ft', $query)
+		YIELD node, score
+		SET node.last_used = datetime(),
+			node.use_count = coalesce(node.use_count, 0) + 1
+		RETURN node
+		LIMIT $limit
+		`
+	} else {
+		cypher = `
+		CALL db.index.fulltext.queryNodes('shard_content_ft', $query)
+		YIELD node, score
+		RETURN node
+		LIMIT $limit
+		`
+	}
 	params := map[string]any{
 		"query": query,
 		"limit": limit,
@@ -519,17 +563,35 @@ func (v *VesselGraph) FindText(ctx context.Context, query string, limit int) ([]
 func (v *VesselGraph) FindHybrid(ctx context.Context, textQuery string, queryVector []byte, limit int) ([]Shard, error) {
 	candidateLimit := limit * 2
 
-	vectorResults, err := v.FindResonant(ctx, queryVector, candidateLimit)
+	vectorResults, err := v.FindResonant(ctx, queryVector, candidateLimit, true)
 	if err != nil {
 		return nil, fmt.Errorf("vector search failed in hybrid: %w", err)
 	}
 
-	textResults, err := v.FindText(ctx, textQuery, candidateLimit)
+	textResults, err := v.FindText(ctx, textQuery, candidateLimit, true)
 	if err != nil {
 		return nil, fmt.Errorf("text search failed in hybrid: %w", err)
 	}
 
 	return ReciprocalRankFusion(limit, 60.0, vectorResults, textResults), nil
+}
+
+func (v *VesselGraph) GetShardByID(ctx context.Context, id string) (Shard, error) {
+	query := "MATCH (s:Shard {id: $id}) RETURN s"
+	res, err := neo4j.ExecuteQuery(ctx, v.driver, query, map[string]any{"id": id}, neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithDatabase(v.dbName))
+	if err != nil {
+		return Shard{}, err
+	}
+	if len(res.Records) == 0 {
+		return Shard{}, fmt.Errorf("shard %s not found in mesh", id)
+	}
+	node, _ := res.Records[0].Get("s")
+	return nodeToShard(node.(neo4j.Node)), nil
+}
+
+func (v *VesselGraph) GetArchivedShards(ctx context.Context) ([]Shard, error) {
+	return nil, nil // Neo4j is for living memory only
 }
 
 func (v *VesselGraph) GetCoreShards(ctx context.Context) ([]Shard, error) {
@@ -548,22 +610,34 @@ func (v *VesselGraph) GetCoreShards(ctx context.Context) ([]Shard, error) {
 	return shards, nil
 }
 
-func (v *VesselGraph) SearchGraph(ctx context.Context, queryVector []byte, limit int) ([]Shard, []ShardBond, error) {
+func (v *VesselGraph) SearchGraph(ctx context.Context, queryVector []byte, limit int, shouldTouch bool) ([]Shard, []ShardBond, error) {
 	vec := decodeVector(queryVector)
 	
 	// Multi-Hop: Find the center AND its connected neighbors + relationships
-	query := `
-	CALL db.index.vector.queryNodes('shard_embeddings', 1, $vector)
-	YIELD node AS center, score
-	SET center.last_used = datetime(),
-	    center.use_count = coalesce(center.use_count, 0) + 1
-	WITH center
-	OPTIONAL MATCH (center)-[r:CONNECTED_TO]-(neighbor:Shard)
-	SET neighbor.last_used = datetime(),
-	    neighbor.use_count = coalesce(neighbor.use_count, 0) + 1
-	WITH center, neighbor, r
-	RETURN center, count(r) as centerDegree, collect({node: neighbor, weight: r.weight}) as neighbors
-	`
+	var query string
+	if shouldTouch {
+		query = `
+		CALL db.index.vector.queryNodes('shard_embeddings', 1, $vector)
+		YIELD node AS center, score
+		SET center.last_used = datetime(),
+			center.use_count = coalesce(center.use_count, 0) + 1
+		WITH center
+		OPTIONAL MATCH (center)-[r:CONNECTED_TO]-(neighbor:Shard)
+		SET neighbor.last_used = datetime(),
+			neighbor.use_count = coalesce(neighbor.use_count, 0) + 1
+		WITH center, neighbor, r
+		RETURN center, count(r) as centerDegree, collect({node: neighbor, weight: r.weight}) as neighbors
+		`
+	} else {
+		query = `
+		CALL db.index.vector.queryNodes('shard_embeddings', 1, $vector)
+		YIELD node AS center, score
+		WITH center
+		OPTIONAL MATCH (center)-[r:CONNECTED_TO]-(neighbor:Shard)
+		WITH center, neighbor, r
+		RETURN center, count(r) as centerDegree, collect({node: neighbor, weight: r.weight}) as neighbors
+		`
+	}
 	params := map[string]any{
 		"vector": vec,
 	}
@@ -623,6 +697,8 @@ func (v *VesselGraph) SyncBonds(ctx context.Context, threshold float64) (int, er
 	MATCH (s1:Shard)
 	MATCH (s2:Shard)
 	WHERE elementId(s1) < elementId(s2)
+	  AND s1.category <> 'archived'
+	  AND s2.category <> 'archived'
 	  AND size(s1.embedding) = 3072 
 	  AND size(s2.embedding) = 3072
 	WITH s1, s2, gds.similarity.cosine(s1.embedding, s2.embedding) AS sim

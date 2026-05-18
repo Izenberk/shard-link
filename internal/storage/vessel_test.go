@@ -44,7 +44,7 @@ func TestVessel_Resonance(t *testing.T) {
 
 	// 3.Search using Vector A
 	// It should return shard-a as the top result (distance 0.0)
-	results, err := v.FindResonant(ctx, vecA, 1)
+	results, err := v.FindResonant(ctx, vecA, 1, true)
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}

@@ -62,7 +62,24 @@ func (v *PostgresVessel) SaveShard(ctx context.Context, s Shard) error {
 	return err
 }
 
-func (v *PostgresVessel) FindResonant(ctx context.Context, queryVector []byte, limit int) ([]Shard, error) {
+func (v *PostgresVessel) SaveArchivedShard(ctx context.Context, s Shard) error {
+	const query = `
+		INSERT INTO shards_archive (id, category, content, vector, metadata, source_type, source_ref, confidence)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT(id) DO UPDATE SET
+			category = EXCLUDED.category,
+			content = EXCLUDED.content,
+			vector = EXCLUDED.vector,
+			metadata = EXCLUDED.metadata,
+			source_type = EXCLUDED.source_type,
+			source_ref = EXCLUDED.source_ref,
+			confidence = EXCLUDED.confidence;
+	`
+	_, err := v.pool.Exec(ctx, query, s.ID, s.Category, s.Content, formatVector(s.Vector), s.Metadata, s.SourceType, s.SourceRef, s.Confidence)
+	return err
+}
+
+func (v *PostgresVessel) FindResonant(ctx context.Context, queryVector []byte, limit int, shouldTouch bool) ([]Shard, error) {
 	// 1. Find the IDs of resonant shards
 	const selectQuery = `
 		SELECT id
@@ -90,16 +107,26 @@ func (v *PostgresVessel) FindResonant(ctx context.Context, queryVector []byte, l
 		return nil, nil
 	}
 
-	// 2. Update last_used and return full shard data
-	const updateQuery = `
-		UPDATE shards 
-		SET last_used = CURRENT_TIMESTAMP
-		WHERE id = ANY($1)
-		RETURNING id, category, content, vector::text, metadata, source_type, source_ref, confidence, created_at, last_used;
-	`
-	rows, err = v.pool.Query(ctx, updateQuery, ids)
+	// 2. Conditionally update last_used and return full shard data
+	var sql string
+	if shouldTouch {
+		sql = `
+			UPDATE shards 
+			SET last_used = CURRENT_TIMESTAMP
+			WHERE id = ANY($1)
+			RETURNING id, category, content, vector::text, metadata, source_type, source_ref, confidence, created_at, last_used;
+		`
+	} else {
+		sql = `
+			SELECT id, category, content, vector::text, metadata, source_type, source_ref, confidence, created_at, last_used
+			FROM shards 
+			WHERE id = ANY($1);
+		`
+	}
+
+	rows, err = v.pool.Query(ctx, sql, ids)
 	if err != nil {
-		return nil, fmt.Errorf("postgres search update failed: %w", err)
+		return nil, fmt.Errorf("postgres search retrieval failed: %w", err)
 	}
 	defer rows.Close()
 
@@ -118,7 +145,7 @@ func (v *PostgresVessel) FindResonant(ctx context.Context, queryVector []byte, l
 	return shards, rows.Err()
 }
 
-func (v *PostgresVessel) FindText(ctx context.Context, query string, limit int) ([]Shard, error) {
+func (v *PostgresVessel) FindText(ctx context.Context, query string, limit int, shouldTouch bool) ([]Shard, error) {
 	const sql = `
 		SELECT id, category, content, vector::text, metadata, source_type, source_ref, confidence
 		FROM shards
@@ -133,6 +160,7 @@ func (v *PostgresVessel) FindText(ctx context.Context, query string, limit int) 
 	defer rows.Close()
 
 	var shards []Shard
+	var ids []string
 	for rows.Next() {
 		var s Shard
 		var vecStr *string
@@ -143,25 +171,87 @@ func (v *PostgresVessel) FindText(ctx context.Context, query string, limit int) 
 			s.Vector = parseVector(*vecStr)
 		}
 		shards = append(shards, s)
+		ids = append(ids, s.ID)
 	}
+
+	if shouldTouch && len(ids) > 0 {
+		_ = v.ReinforceShards(ctx, ids)
+	}
+
 	return shards, rows.Err()
 }
+
+// ReinforceShards manually updates usage metrics for a list of shard IDs.
+func (v *PostgresVessel) ReinforceShards(ctx context.Context, ids []string) error {
+	const query = "UPDATE shards SET last_used = CURRENT_TIMESTAMP WHERE id = ANY($1)"
+	_, err := v.pool.Exec(ctx, query, ids)
+	return err
+}
+
 
 // FindHybrid performs Reciprocal Rank Fusion (RRF) on vector and text search results.
 func (v *PostgresVessel) FindHybrid(ctx context.Context, textQuery string, queryVector []byte, limit int) ([]Shard, error) {
 	candidateLimit := limit * 2
 
-	vectorResults, err := v.FindResonant(ctx, queryVector, candidateLimit)
+	vectorResults, err := v.FindResonant(ctx, queryVector, candidateLimit, true)
 	if err != nil {
 		return nil, fmt.Errorf("vector search failed in hybrid: %w", err)
 	}
 
-	textResults, err := v.FindText(ctx, textQuery, candidateLimit)
+	textResults, err := v.FindText(ctx, textQuery, candidateLimit, true)
 	if err != nil {
 		return nil, fmt.Errorf("text search failed in hybrid: %w", err)
 	}
 
 	return ReciprocalRankFusion(limit, 60.0, vectorResults, textResults), nil
+}
+
+func (v *PostgresVessel) GetShardByID(ctx context.Context, id string) (Shard, error) {
+	// Try active table first
+	const query = `SELECT id, category, content, vector::text, metadata, source_type, source_ref, confidence, last_used, created_at FROM shards WHERE id = $1`
+	var s Shard
+	var vecStr *string
+	err := v.pool.QueryRow(ctx, query, id).Scan(&s.ID, &s.Category, &s.Content, &vecStr, &s.Metadata, &s.SourceType, &s.SourceRef, &s.Confidence, &s.LastUsed, &s.CreatedAt)
+	if err == nil {
+		if vecStr != nil {
+			s.Vector = parseVector(*vecStr)
+		}
+		return s, nil
+	}
+
+	// Fallback to archive
+	const archiveQuery = `SELECT id, category, content, vector::text, metadata, source_type, source_ref, confidence, last_used, created_at FROM shards_archive WHERE id = $1`
+	err = v.pool.QueryRow(ctx, archiveQuery, id).Scan(&s.ID, &s.Category, &s.Content, &vecStr, &s.Metadata, &s.SourceType, &s.SourceRef, &s.Confidence, &s.LastUsed, &s.CreatedAt)
+	if err != nil {
+		return Shard{}, err
+	}
+	if vecStr != nil {
+		s.Vector = parseVector(*vecStr)
+	}
+	return s, nil
+}
+
+func (v *PostgresVessel) GetArchivedShards(ctx context.Context) ([]Shard, error) {
+	const query = `SELECT id, category, content, vector::text, metadata, source_type, source_ref, confidence, last_used, created_at FROM shards_archive`
+	rows, err := v.pool.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var shards []Shard
+	for rows.Next() {
+		var s Shard
+		var vecStr *string
+		if err := rows.Scan(&s.ID, &s.Category, &s.Content, &vecStr, &s.Metadata, &s.SourceType, &s.SourceRef, &s.Confidence, &s.LastUsed, &s.CreatedAt); err != nil {
+			return nil, err
+		}
+		if vecStr != nil {
+			s.Vector = parseVector(*vecStr)
+		}
+		shards = append(shards, s)
+	}
+	return shards, rows.Err()
 }
 
 func (v *PostgresVessel) GetCoreShards(ctx context.Context) ([]Shard, error) {
@@ -292,9 +382,9 @@ func (v *PostgresVessel) GetAllBonds(ctx context.Context) ([]ShardBond, error) {
 	return bonds, rows.Err()
 }
 
-func (v *PostgresVessel) SearchGraph(ctx context.Context, queryVector []byte, limit int) ([]Shard, []ShardBond, error) {
+func (v *PostgresVessel) SearchGraph(ctx context.Context, queryVector []byte, limit int, shouldTouch bool) ([]Shard, []ShardBond, error) {
 	// Postgres fallback to vector search
-	shards, err := v.FindResonant(ctx, queryVector, limit)
+	shards, err := v.FindResonant(ctx, queryVector, limit, shouldTouch)
 	return shards, nil, err
 }
 

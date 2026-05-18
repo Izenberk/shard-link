@@ -21,7 +21,7 @@ func NewSynthesizer(v storage.Repository, interval time.Duration) *Synthesizer {
 	tStr := os.Getenv("MESH_LINK_THRESHOLD")
 	threshold, err := strconv.ParseFloat(tStr, 64)
 	if err != nil {
-		threshold = 0.70
+		threshold = 0.75
 	}
 
 	return &Synthesizer{
