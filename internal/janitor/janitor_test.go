@@ -50,7 +50,7 @@ func TestJanitor_EvictionImmunity(t *testing.T) {
 	}
 
 	// Verify the orphan is gone from active storage
-	results, _ := v.FindResonant(ctx, nil, 10) // nil vector just gets everything
+	results, _ := v.FindResonant(ctx, nil, 10, false) // nil vector just gets everything
 	for _, s := range results {
 		if s.ID == "orphan-1" {
 			t.Error("Orphan-1 was NOT evicted!")

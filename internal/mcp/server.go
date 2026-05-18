@@ -107,6 +107,87 @@ func (s *MCPServer) RegisterTools() {
 		mcp.WithNumber("limit", mcp.Description("Max neighbors to return")),
 	)
 	s.mcp.AddTool(graphTool, s.handleSearchGraph)
+
+	log.Println("[MCP] Registering Tool: search_all")
+	searchAllTool := mcp.NewTool("search_all",
+		mcp.WithDescription("Comprehensive search across all memory engines (Vector, Text, and Graph Mesh). Deduplicates results and provides relational context."),
+		mcp.WithString("query", mcp.Description("The keyword or natural language topic to search for"), mcp.Required()),
+		mcp.WithNumber("limit", mcp.Description("Max results per engine"), mcp.DefaultNumber(5)),
+	)
+	s.mcp.AddTool(searchAllTool, s.handleSearchAll)
+}
+
+func (s *MCPServer) handleSearchAll(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	log.Printf("[MCP] Calling Tool: search_all (%v)", request.Params.Arguments)
+	query := request.GetString("query", "")
+	limit := int(request.GetFloat("limit", 5))
+
+	if query == "" {
+		return mcp.NewToolResultError("Query must be provided"), nil
+	}
+
+	// 1. Parallel Execution: Vector, Text, and Graph
+	// Note: We use the embedder if available for vector-based searches
+	var queryVec []byte
+	if s.embedder != nil {
+		floats, err := s.embedder.Embed(ctx, query)
+		if err == nil {
+			queryVec = storage.EncodeVector(floats)
+		}
+	}
+
+	// Deduplication map
+	seenShards := make(map[string]storage.Shard)
+	var allBonds []storage.ShardBond
+
+	// A. Text Search (Don't touch yet)
+	textShards, _ := s.vessel.FindText(ctx, query, limit, false)
+	for _, shard := range textShards {
+		seenShards[shard.ID] = shard
+	}
+
+	// B. Vector & Graph Search (Don't touch yet)
+	if queryVec != nil {
+		gShards, gBonds, _ := s.vessel.SearchGraph(ctx, queryVec, limit, false)
+		for _, shard := range gShards {
+			seenShards[shard.ID] = shard
+		}
+		allBonds = append(allBonds, gBonds...)
+
+		vShards, _ := s.vessel.FindResonant(ctx, queryVec, limit, false)
+		for _, shard := range vShards {
+			seenShards[shard.ID] = shard
+		}
+	}
+
+	if len(seenShards) == 0 {
+		return mcp.NewToolResultText("No matching memory shards found across any engine."), nil
+	}
+
+	// AHA! MOMENT: Unified Reinforcement Step
+	// Now that we've deduplicated, touch all identified shards EXACTLY ONCE.
+	shardIDs := make([]string, 0, len(seenShards))
+	for id := range seenShards {
+		shardIDs = append(shardIDs, id)
+	}
+	_ = s.vessel.ReinforceShards(ctx, shardIDs)
+
+	// C. Format Response
+	var response string
+	response = fmt.Sprintf("Found %d unique shards and %d relational bonds:\n---\n", len(seenShards), len(allBonds))
+	
+	for _, shard := range seenShards {
+		response += fmt.Sprintf("[%s] (Score: %.2f): %s\n---\n", shard.ID, shard.Confidence, shard.Content)
+	}
+
+	if len(allBonds) > 0 {
+		response += "\nRelational Bonds (Mesh Geometry):\n"
+		for _, bond := range allBonds {
+			response += fmt.Sprintf("- %s <-> %s (Strength: %.2f)\n", bond.FromID, bond.ToID, bond.Weight)
+		}
+	}
+
+	return mcp.NewToolResultText(response), nil
 }
 
 func (s *MCPServer) handleSearchGraph(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -133,7 +214,7 @@ func (s *MCPServer) handleSearchGraph(ctx context.Context, request mcp.CallToolR
 		return mcp.NewToolResultError("Either query_vector or query_text must be provided"), nil
 	}
 
-	shards, bonds, err := s.vessel.SearchGraph(ctx, queryVec, limit)
+	shards, bonds, err := s.vessel.SearchGraph(ctx, queryVec, limit, true)
 	if err != nil {
 		log.Printf("[MCP ERROR] search_graph failed: %v", err)
 		return nil, err
@@ -206,7 +287,7 @@ func (s *MCPServer) handleSearch(ctx context.Context, request mcp.CallToolReques
 		return mcp.NewToolResultError("Either query_vector or query_text must be provided"), nil
 	}
 
-	results, err := s.vessel.FindResonant(ctx, queryVec, limit)
+	results, err := s.vessel.FindResonant(ctx, queryVec, limit, true)
 	if err != nil {
 		log.Printf("[MCP ERROR] search_memory failed: %v", err)
 		return nil, err
@@ -225,7 +306,7 @@ func (s *MCPServer) handleSearchText(ctx context.Context, request mcp.CallToolRe
 	query := request.GetString("query", "")
 	limit := int(request.GetFloat("limit", 5))
 
-	results, err := s.vessel.FindText(ctx, query, limit)
+	results, err := s.vessel.FindText(ctx, query, limit, true)
 	if err != nil {
 		log.Printf("[MCP ERROR] search_text failed: %v", err)
 		return nil, err
@@ -246,7 +327,7 @@ func (s *MCPServer) handleSearchText(ctx context.Context, request mcp.CallToolRe
 func (s *MCPServer) RegisterPrompts() {
 	log.Println("[MCP] Registering Prompt: hub_search")
 	shardPrompt := mcp.NewPrompt("hub_search",
-		mcp.WithPromptDescription("Global search across Shard-Link memory (Neo4j Mesh)"),
+		mcp.WithPromptDescription("Global search across Shard-Link memory (Neo4j Mesh). Uses the 'search_all' meta-tool for maximum context."),
 		mcp.WithArgument("query", mcp.ArgumentDescription("Keyword or topic to search for"), mcp.RequiredArgument()),
 	)
 	s.mcp.AddPrompt(shardPrompt, s.handleShardPrompt)
@@ -254,30 +335,13 @@ func (s *MCPServer) RegisterPrompts() {
 
 func (s *MCPServer) handleShardPrompt(ctx context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 	query := request.Params.Arguments["query"]
-	log.Printf("[MCP] Handling Prompt Request: mesh_search (query: %s)", query)
+	log.Printf("[MCP] Handling Prompt Request: hub_search (query: %s)", query)
+	
+	message := mcp.NewPromptMessage(mcp.RoleUser, mcp.NewTextContent(
+		fmt.Sprintf("Please use the 'search_all' tool to find all relevant shards and graph relationships for the topic: '%s'. Provide a high-signal summary of what you find.", query),
+	))
 
-	shards, err := s.vessel.FindText(ctx, query, 5)
-	if err != nil {
-		log.Printf("[MCP ERROR] mesh_search prompt failed: %v", err)
-		return nil, err
-	}
-
-	var body string
-	if len(shards) == 0 {
-		body = fmt.Sprintf("No memory shards found for query: %s", query)
-	} else {
-		body = "Relevant Memory Shards:\n---\n"
-		for _, shard := range shards {
-			body += fmt.Sprintf("[%s] (%s): %s\n---\n", shard.ID, shard.Category, shard.Content)
-		}
-	}
-
-	return mcp.NewGetPromptResult(
-		"Shard-Link Context Retrieval",
-		[]mcp.PromptMessage{
-			mcp.NewPromptMessage(mcp.RoleUser, mcp.NewTextContent(body)),
-		},
-	), nil
+	return mcp.NewGetPromptResult("Search Results", []mcp.PromptMessage{message}), nil
 }
 
 func (s *MCPServer) StartSSE(port int, baseURL string) error {

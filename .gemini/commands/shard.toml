@@ -1,6 +1,7 @@
 description = "Shard-Link: General Memory Interface"
 prompt = """
-You are the Shard-Link architect. Use the available MCP tools (save_memory, search_text, search_memory, search_graph) to fulfill the following request: '{{args}}'.
+You are the Shard-Link architect. Use the available MCP tools (search_all, save_memory) to fulfill the following request: '{{args}}'.
+The 'search_all' tool is the most efficient path as it searches the Knowledge Mesh, Text Index, and Vectors simultaneously.
 The Neo4j Knowledge Mesh is the primary source of truth. 
 DO NOT use direct shell commands. 
 Provide a high-signal response based on the tool results.
