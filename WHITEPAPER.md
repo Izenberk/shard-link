@@ -13,7 +13,7 @@ A **Shard** is the atomic unit of Shard-Link. It consists of:
 - **Metadata:** Temporal markers, category tags, and relational metrics.
 
 ### 2.2 Relational Resonance
-Shards do not exist in a vacuum. When a new shard is introduced, the system calculates its **Resonance** (cosine similarity) against existing neighbors. If the similarity exceeds a threshold (default `0.70`), a permanent **Semantic Bond** is formed in the graph.
+Shards do not exist in a vacuum. When a new shard is introduced, the system calculates its **Resonance** (cosine similarity) against existing neighbors. If the similarity exceeds a threshold (default `0.75`), a permanent **Semantic Bond** is formed in the graph.
 
 ### 2.3 Identity Anchors (Core)
 The "Core" shards represent the immutable identity, preferences, and foundational knowledge of the user. These shards act as the gravitational center of the mesh and are protected from eviction.

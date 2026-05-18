@@ -23,7 +23,7 @@ func main() {
 	
 	threshold := os.Getenv("MESH_LINK_THRESHOLD")
 	if threshold == "" {
-		threshold = "0.70"
+		threshold = "0.75"
 	}
 
 	// Cypher query to automatically link shards based on embedding similarity

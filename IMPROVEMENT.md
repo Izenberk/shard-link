@@ -76,5 +76,12 @@ This document tracks the resolution of architectural bottlenecks and outlines fu
 - **Aggressive Heartbeats:** Reduced the MCP SSE keep-alive interval from 15s to 10s to maintain stable tunnel connectivity.
 - **Non-Blocking Synthesis:** Refactored the `Synthesizer` to execute intensive Louvain community refreshes asynchronously, preventing main-loop blocking and session timeouts.
 
+## ✅ Resolved: Surgical Archival & Dynamic Perimeter (2026-05-19)
+**The Problem:** Manual eviction was a "destructive" process that permanently deleted data, and there was no architectural protection for Core Identity shards. Furthermore, the dashboard lacked a visual distinction between active knowledge and cold-storage fragments.
+**The Solution:** Implemented the **"White Dwarf" Archival Model**.
+- **Multi-Vessel Migration:** Eviction now moves shards from the Neo4j "Living Mesh" to the PostgreSQL "Archival Vessel," severing high-cost bonds while preserving the underlying data.
+- **Double-Lock Protection:** Implemented UI-level button hiding and API-level 403 Forbidden rejection to prevent accidental eviction of `core` identity shards.
+- **Dynamic Orbital Physics:** The dashboard now calculates the "Galactic Perimeter" dynamically (Farthest Shard + 300px), ensuring archived White Dwarfs always orbit in a clear, non-overlapping outer system.
+
 ---
-*Last Updated: 2026-05-17*
+*Last Updated: 2026-05-19*

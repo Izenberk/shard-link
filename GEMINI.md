@@ -28,7 +28,7 @@ Shard-Link is a high-performance context engine designed to provide "long-term m
 
 ## 5. Knowledge Mesh Thresholds
 The system utilizes tunable thresholds to manage connectivity and memory preservation. These are managed via environment variables:
-- `MESH_LINK_THRESHOLD`: The minimum cosine similarity (default 0.70) required for the `auto_link` tool to create a permanent relationship between shards.
+- `MESH_LINK_THRESHOLD`: The minimum cosine similarity (default 0.75) required for the `auto_link` tool to create a permanent relationship between shards.
 - `JANITOR_RESONANCE_THRESHOLD`: The minimum resonance (default 0.70) required to protect a non-core shard from eviction by the Janitor.
 
 ## 6. Development Philosophy & Mentorship

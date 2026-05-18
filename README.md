@@ -27,7 +27,7 @@ GEMINI_API_KEY=your_gemini_key
 NEO4J_URL=bolt://localhost:7687
 NEO4J_USER=neo4j
 NEO4J_PASS=shardpass
-MESH_LINK_THRESHOLD=0.70
+MESH_LINK_THRESHOLD=0.75
 ```
 
 ### 2. Ignite the Hub & Dashboard
