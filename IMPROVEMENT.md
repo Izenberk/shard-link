@@ -85,5 +85,15 @@ This document tracks the resolution of architectural bottlenecks and outlines fu
 - **Architectural Dashboard Hardening:** Implemented a global **Adjacency Map** and **Position Preservation Layer** in Visual Ego. This eliminates race conditions during rapid selection, provides $O(1)$ neighbor lookups, and ensures the mesh remains stationary during background metric updates, behaving exactly like a manual refresh.
 - **Manual Metric Control:** Introduced the `REFRESH_METRICS` protocol, allowing the user to sync cognitive stats (Survival/PageRank) on-demand while maintaining a stable, pulse-free environment during active inspection.
 
+## ✅ Resolved: Streamable HTTP Transport Migration (2026-05-21)
+**The Problem:** The MCP server initially used the legacy SSE transport (`/sse` + `/message`), which created long-lived connections that were frequently dropped by the Cloudflare tunnel due to idle timeouts. The `agy` CLI also exhibited hangs when communicating with the server over SSE.
+**The Solution:** Migrated the primary MCP transport to **Streamable HTTP** (MCP spec 2024-11-05).
+- Added `server.NewStreamableHTTPServer` serving on `/mcp` as the primary endpoint.
+- Kept the legacy SSE handler on `/sse` for backward compatibility.
+- Applied the shared `withAuth` middleware to both routes uniformly.
+- Renamed `StartSSE` → `StartHub` to accurately reflect the multi-protocol reality.
+- The `mcp_config.json` in `antigravity-cli` now uses `type: streamable-http` pointed at `/mcp`.
+- Verified end-to-end via direct curl: `initialize` handshake → `notifications/initialized` → `tools/call` (search_all, save_memory).
+
 ---
-*Last Updated: 2026-05-19*
+*Last Updated: 2026-05-21*

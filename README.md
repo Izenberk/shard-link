@@ -12,7 +12,7 @@ Shard-Link utilizes a multi-vessel storage strategy to optimize for intelligence
 - **SQLite (The Seed Memory):** Local-first anchor for Core Identity shards and the persistent activity ledger.
 - **PostgreSQL + pgvector (The Archival Vessel):** High-volume relational scaler for deep memory archiving and SIMD-accelerated search.
 - **Backend:** Go (Golang) 1.26+ (Strict SOLID standards).
-- **Protocol:** MCP (Model Context Protocol) over SSE/JSON-RPC.
+- **Protocol:** MCP (Model Context Protocol) over Streamable HTTP (primary) and SSE (legacy).
 
 ## 3. Quick Start (Ready for Clone & Run)
 
@@ -47,7 +47,7 @@ Use this if you want to explicitly disable external access.
 ```bash
 docker compose --profile local up -d --build
 ```
-- **Local Hub:** `http://localhost:8080/sse`
+- **Local Hub:** `http://localhost:8080/mcp` (Streamable HTTP) or `http://localhost:8080/sse` (Legacy SSE)
 - **Visual Ego Dashboard:** `http://localhost:8081`
 - **Neo4j Browser:** `http://localhost:7474` (Credentials: neo4j / shardpass)
 
@@ -104,16 +104,72 @@ Shard-Link implements **Defense in Depth** to ensure security without requiring 
 2. **The App (Token Middleware):** A required `X-API-Key` header ensures only authorized agents can access the Vessel.
 3. **The Transport (HTTPS):** Encryption-in-transit ensures that tokens cannot be sniffed.
 
-## 9. Documentation & Roadmap
+## 9. Client Integration
+
+Shard-Link communicates over the standard **Model Context Protocol (MCP)** using the **Streamable HTTP** transport (MCP spec 2024-11-05). Legacy SSE transport is kept at `/sse` for backward compatibility.
+
+### Supported Transports
+
+| Transport | Endpoint | Status | Spec |
+|-----------|----------|--------|------|
+| **Streamable HTTP** | `/mcp` | Primary (recommended) | MCP 2024-11-05 |
+| **SSE** | `/sse` | Legacy (backward compat) | Deprecated |
+
+### Claude Code (Recommended)
+
+Add Shard-Link to your user-scoped MCP configuration:
+
+```bash
+claude mcp add --transport http shard-link https://hub.izenberk.com/mcp \
+  --header "X-API-Key: YOUR_HUB_API_KEY_HERE" \
+  --scope user
+```
+
+Verify the connection:
+```bash
+claude mcp get shard-link
+```
+
+### Claude Code Skill (`/shard`)
+
+Create a global skill at `~/.claude/skills/shard/SKILL.md`:
+
+```markdown
+---
+name: shard
+description: Shard-Link memory interface - search and save to long-term AI memory via remote MCP
+disable-model-invocation: false
+argument-hint: [query or command]
+---
+
+# Shard-Link: Resonant Memory Interface
+
+You are the Shard-Link architect. Your ONLY job is to fulfill the following request
+using the registered MCP tools: **$ARGUMENTS**
+
+## Available MCP Tools
+- `shard-link:search_all` → PRIMARY. Searches Neo4j, Text Index, and Vector embeddings.
+- `shard-link:save_memory` → Persist new facts.
+```
+
+Use it in any Claude Code session:
+```text
+/shard What is my favorite programming language?
+/shard Remember: I prefer Go for backend development
+```
+
+---
+
+## 10. Documentation & Roadmap
 - **[Implementation Roadmap (PLAN.md)](./PLAN.md):** Track the phase-by-phase progress of the Hub.
 - **[Improvements Track (IMPROVEMENT.md)](./IMPROVEMENT.md):** Architectural bottlenecks and performance optimization logs.
 - **[Core Context (GEMINI.md)](./GEMINI.md):** Foundational mandates and domain logic for AI agents.
 
-## 10. High-Resiliency Design
+## 11. High-Resiliency Design
 Shard-Link is built for production-grade stability across disparate environments:
 - **Startup Resilience:** The Hub implements a 150-second "Ignition Loop," allowing it to wait for the Knowledge Mesh to finish intensive plugin installations (APOC/GDS) after a system reboot.
-- **Tunnel Stability:** MCP connections are protected by aggressive 10-second SSE heartbeats, preventing Cloudflare and other edge proxies from dropping idle sessions.
+- **Tunnel Stability:** MCP connections are protected by aggressive 10-second heartbeats (`server.WithHeartbeatInterval`), preventing Cloudflare and other edge proxies from dropping idle sessions. Both Streamable HTTP (`/mcp`) and legacy SSE (`/sse`) transports benefit from this.
 - **Asynchronous Thinking:** Intensive graph operations (Louvain communities) are offloaded to background goroutines, ensuring the semantic search tools remain responsive under load.
 
 ---
-*Status: PHASE 11 COMPLETE (Autonomous Memory + Enhanced Observability) | Date: 2026-05-17*
+*Status: PHASE 11 COMPLETE (Autonomous Memory + Enhanced Observability) | Transport: Streamable HTTP (MCP 2024-11-05) | Date: 2026-05-22*

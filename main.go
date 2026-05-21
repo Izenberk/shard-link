@@ -138,7 +138,7 @@ func main() {
 	}
 
 	go func() {
-		if err := srv.StartSSE(8080, publicURL); err != nil {
+		if err := srv.StartHub(8080, publicURL); err != nil {
 			log.Fatalf("Bridge collapsed: %v", err)
 		}
 	}()

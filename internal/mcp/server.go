@@ -344,27 +344,34 @@ func (s *MCPServer) handleShardPrompt(ctx context.Context, request mcp.GetPrompt
 	return mcp.NewGetPromptResult("Search Results", []mcp.PromptMessage{message}), nil
 }
 
-func (s *MCPServer) StartSSE(port int, baseURL string) error {
-	log.Printf("[MCP] Starting SSE Server on :%d with baseURL: %s", port, baseURL)
-	sseServer := server.NewSSEServer(s.mcp,
+// StartHub ignites the multi-protocol MCP bridge.
+// Primary transport: Streamable HTTP on /mcp (MCP spec 2024-11-05).
+// Legacy transport:  Standard SSE on /sse + /message (kept for backward compat).
+func (s *MCPServer) StartHub(port int, baseURL string) error {
+	log.Printf("[MCP] Starting Hub on :%d | Streamable-HTTP → /mcp | SSE → /sse (baseURL: %s)", port, baseURL)
+
+	// 1. Primary: Streamable HTTP transport (MCP spec 2024-11-05)
+	streamableSrv := server.NewStreamableHTTPServer(s.mcp,
+		server.WithHeartbeatInterval(10*time.Second),
+	)
+
+	// 2. Legacy: Standard SSE transport (backward compat)
+	sseSrv := server.NewSSEServer(s.mcp,
 		server.WithBaseURL(baseURL),
-		server.WithKeepAliveInterval(10*time.Second),
+		server.WithSSEEndpoint("/sse"),
+		server.WithMessageEndpoint("/message"),
 	)
 
 	mux := http.NewServeMux()
 
-	mux.Handle("/sse", s.withAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("[SSE] New connection request from %s", r.RemoteAddr)
-		sseServer.SSEHandler().ServeHTTP(w, r)
-	})))
+	// Primary route — Streamable HTTP
+	mux.Handle("/mcp", s.withAuth(streamableSrv))
 
-	mux.Handle("/message", s.withAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Log incoming messages for discovery debugging
-		// log.Printf("[MCP] Received message from %s", r.RemoteAddr)
-		sseServer.MessageHandler().ServeHTTP(w, r)
-	})))
+	// Legacy routes — Standard SSE
+	mux.Handle("/sse", s.withAuth(sseSrv.SSEHandler()))
+	mux.Handle("/message", s.withAuth(sseSrv.MessageHandler()))
 
-	log.Printf("Shard-Link Authenticated Bridge ignited on :%d/sse\n", port)
+	log.Printf("[MCP] Hub ignited on :%d — Primary: Streamable HTTP (/mcp) | Legacy: SSE (/sse)\n", port)
 	return http.ListenAndServe(fmt.Sprintf(":%d", port), mux)
 }
 

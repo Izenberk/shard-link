@@ -43,3 +43,6 @@ neo4j_plugins/
 *.sh
 *.py
 neo4j_records.json
+
+# Legacy Gemini CLI config (migrated to .claude/)
+.gemini/
