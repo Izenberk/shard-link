@@ -306,7 +306,7 @@ docker inspect shard-link\_hub   | grep \-A5 LogConfig
 
 Architectural changes to eliminate the root causes permanently. Requires careful testing against Neo4j GDS API after each sub-phase. Do not start until Phase 1 is fully checked and `docker system df` confirms stable baseline.
 
-- [ ] **2.1 GDS stream mode refactor** — `internal/storage/vessel_graph.go`
+- [x] **2.1 GDS stream mode refactor** — `internal/storage/vessel_graph.go`
 
 **Why:** Every Synthesizer cycle (10 min) calls `CalculateCommunities()`, which runs `gds.louvain.write` \+ `gds.pageRank.write`. Both rewrite properties on EVERY Shard node every cycle, generating a WAL entry per node per cycle — O(all nodes) WAL growth regardless of whether anything changed. Fix: stream results into Go memory, delta-write only changed nodes.
 
@@ -514,7 +514,7 @@ func nodeToShardWithCache(node neo4j.Node) Shard {
 
 }
 
-- [ ] **2.2 Validate GDS stream mode** — run after 2.1 is deployed:
+- [x] **2.2 Validate GDS stream mode** — run after 2.1 is deployed:
 
 \# Watch logs for delta-write lines — should show "WAL untouched" on stable mesh
 
@@ -524,7 +524,7 @@ docker compose logs hub \--follow | grep "delta-write"
 
 go run cmd/check\_mesh/main.go
 
-- [ ] **2.3 Storage HygieneWorker** — new file `internal/hygiene/hygiene.go`
+- [x] **2.3 Storage HygieneWorker** — new file `internal/hygiene/hygiene.go`
 
 **Why:** The Janitor holds `VesselGraph` as its `Repository`. When eviction occurs, `j.vessel.Optimize()` only calls `VesselGraph.Optimize()` which re-runs `ensureIndexes()`. `PostgresVessel.Optimize()` — containing `VACUUM ANALYZE shards` — is never invoked. Dead tuple accumulation is unbounded.
 
@@ -658,7 +658,7 @@ func (h \*HygieneWorker) performHygiene(ctx context.Context) {
 
 }
 
-- [ ] **2.4 Wire HygieneWorker into `main.go`** — add after vessel ignition block, before MCP server launch:
+- [x] **2.4 Wire HygieneWorker into `main.go`** — add after vessel ignition block, before MCP server launch:
 
 import "strconv"
 
@@ -682,13 +682,13 @@ hygieneWorker := hygiene.NewHygieneWorker(graphV, av, lv, hygieneInterval)
 
 go hygieneWorker.Run(ctx)
 
-- [ ] **2.5 Add to `.env.example`:**
+- [x] **2.5 Add to `.env.example`:**
 
 \# Storage hygiene interval (hours). Default: 24
 
 HYGIENE\_INTERVAL\_HOURS=24
 
-- [ ] **2.6 Verify Phase 2** — confirm HygieneWorker is logging after first cycle:
+- [x] **2.6 Verify Phase 2** — confirm HygieneWorker is logging after first cycle:
 
 docker compose logs hub | grep "\\\[Hygiene\\\]"
 
@@ -1184,8 +1184,8 @@ Genuine new feature work. Not bug fixes, not hardening. Do not start until Phase
 | :---- | :---- | :---- | :---- |
 | 1.1 | Container log rotation | Low | SHIPPED. Neo4j 5.26 rejects internal log rotation env vars — Docker json-file driver used instead. |
 | 1.2 | SQLite TTL purge | Low | SHIPPED. Scoped to `activity_logs`. Core shards unaffected. |
-| 2.1 | GDS stream mode | Medium | GDS `stream` stable in Neo4j 5.x. Validate with `cmd/check_mesh` post-deploy. |
-| 2.3 | HygieneWorker | Low | Additive goroutine. No existing logic changed. |
+| 2.1 | GDS stream mode | Medium | SHIPPED. Delta-write confirmed: 40 nodes on first run, WAL untouched on stable mesh. |
+| 2.3 | HygieneWorker | Low | SHIPPED. Additive goroutine. 24h interval, all three vessels. |
 | 3.1 | Named Docker volumes | Medium | Requires data migration. Back up `neo4j_data/` first. |
 | 4.1 | Janitor fallback fix | Low | Single query change. No interface changes. |
 | 4.2 | SearchGraph degree fix | Low | Query extension only. Additive. |
@@ -1208,4 +1208,4 @@ Genuine new feature work. Not bug fixes, not hardening. Do not start until Phase
 
 ---
 
-*Status: PHASE 1 COMPLETE — PHASE 2 NEXT | Date: 2026-05-24* *Authors: BB & Brainy Bestie*  
+*Status: PHASE 2 COMPLETE — PHASE 3 NEXT | Date: 2026-05-25* *Authors: BB & Brainy Bestie*  

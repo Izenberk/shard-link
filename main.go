@@ -5,8 +5,10 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"time"
 
+	"github.com/izenberk/shard-link/internal/hygiene"
 	"github.com/izenberk/shard-link/internal/janitor"
 	"github.com/izenberk/shard-link/internal/mcp"
 	"github.com/izenberk/shard-link/internal/storage"
@@ -92,7 +94,23 @@ func main() {
 	go jan.Run(ctx)
 	go syn.Run(ctx)
 
-	// 4. Configure Intelligence (Phase 10: Standalone Intelligence)
+	// 4. Summon the HygieneWorker (Storage Maintenance)
+	graphV, _ := v.(*storage.VesselGraph)
+	var av *storage.PostgresVessel
+	if connStr := os.Getenv("DATABASE_URL"); connStr != "" {
+		av, _ = storage.NewPostgresVessel(ctx, connStr)
+	}
+
+	hygieneInterval := 24 * time.Hour
+	if h := os.Getenv("HYGIENE_INTERVAL_HOURS"); h != "" {
+		if hours, err := strconv.Atoi(h); err == nil {
+			hygieneInterval = time.Duration(hours) * time.Hour
+		}
+	}
+	hygieneWorker := hygiene.NewHygieneWorker(graphV, av, lv, hygieneInterval)
+	go hygieneWorker.Run(ctx)
+
+	// 5. Configure Intelligence
 	var emb storage.Embedder
 	mode := os.Getenv("EMBEDDING_MODE") // options: "none", "server", "local"
 	
@@ -129,7 +147,7 @@ func main() {
 		log.Println("SHARD-LINK: Intelligence is in 'Manual/Mock' mode (No embedding)")
 	}
 
-	// 5. Launch the Authenticated Bridge
+	// 6. Launch the Authenticated Bridge
 	srv := mcp.NewMCPServer(v, apiKey, emb)
 
 	publicURL := os.Getenv("PUBLIC_URL")

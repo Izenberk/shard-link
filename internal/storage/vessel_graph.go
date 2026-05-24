@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
@@ -15,6 +16,17 @@ type VesselGraph struct {
 	driver neo4j.DriverWithContext
 	dbName string
 }
+
+// Community metrics cache for delta-write optimization
+type CommunityMetrics struct {
+	CommunityID		int64
+	PageRank			float64
+}
+
+var (
+	communityCache		map[string]CommunityMetrics
+	communityCacheMu	sync.RWMutex
+)
 
 // NewVesselGraph initializes the Neo4j connection and ensures the Vector Index exists.
 func NewVesselGraph(uri, user, pass, dbName string) (*VesselGraph, error) {
@@ -282,58 +294,99 @@ func (v *VesselGraph) GetEvictionCandidates(ctx context.Context, limit int) ([]s
 // Helpers
 
 func (v *VesselGraph) CalculateCommunities(ctx context.Context) (int, error) {
-	const cleanupQuery = `CALL gds.graph.drop('communityGraph', false)`
-	const projectQuery = `
-	CALL gds.graph.project('communityGraph', 'Shard', 'CONNECTED_TO', {
-		relationshipProperties: 'weight'
-	}) YIELD graphName
-	`
-	const louvainQuery = `
-	CALL gds.louvain.write('communityGraph', {
-		writeProperty: 'community'
-	}) YIELD communityCount
-	RETURN communityCount
-	`
-	const pageRankQuery = `
-	CALL gds.pageRank.write('communityGraph', {
-		writeProperty: 'pagerank'
-	}) YIELD computeMillis
-	RETURN computeMillis
-	`
-	const dropQuery = `CALL gds.graph.drop('communityGraph', false)`
+			const cleanupQuery = `CALL gds.graph.drop('communityGraph', false)`
+			const projectQuery = `
+			CALL gds.graph.project('communityGraph', 'Shard', 'CONNECTED_TO', {
+							relationshipProperties: 'weight'
+			}) YIELD graphName`
+			const louvainQuery = `
+			CALL gds.louvain.stream('communityGraph')
+			YIELD nodeId, communityId
+			RETURN gds.util.asNode(nodeId).id AS shardID, communityId`
+			const pageRankQuery = `
+			CALL gds.pageRank.stream('communityGraph')
+			YIELD nodeId, score
+			RETURN gds.util.asNode(nodeId).id AS shardID, score`
+			const dropQuery = `CALL gds.graph.drop('communityGraph', false)`
 
-	session := v.driver.NewSession(ctx, neo4j.SessionConfig{DatabaseName: v.dbName})
-	defer session.Close(ctx)
+			session := v.driver.NewSession(ctx, neo4j.SessionConfig{DatabaseName: v.dbName})
+			defer session.Close(ctx)
 
-	var count int
-	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		_, _ = tx.Run(ctx, cleanupQuery, nil) // Ensure clean state
-		_, err := tx.Run(ctx, projectQuery, nil)
-		if err != nil {
-			return nil, err
-		}
+			newCache := make(map[string]CommunityMetrics)
 
-		res, err := tx.Run(ctx, louvainQuery, nil)
-		if err != nil {
-			return nil, err
-		}
+			_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+							_, _ = tx.Run(ctx, cleanupQuery, nil)
 
-		if res.Next(ctx) {
-			val, _ := res.Record().Get("communityCount")
-			count = int(val.(int64))
-		}
+							if _, err := tx.Run(ctx, projectQuery, nil); err != nil {
+											return nil, err
+							}
 
-		// Calculate PageRank as well
-		_, err = tx.Run(ctx, pageRankQuery, nil)
-		if err != nil {
-			return nil, err
-		}
+							lRes, err := tx.Run(ctx, louvainQuery, nil)
+							if err != nil {
+											return nil, err
+							}
+							for lRes.Next(ctx) {
+											id, _ := lRes.Record().Get("shardID")
+											comm, _ := lRes.Record().Get("communityId")
+											newCache[id.(string)] = CommunityMetrics{CommunityID: comm.(int64)}
+							}
 
-		_, _ = tx.Run(ctx, dropQuery, nil)
-		return nil, nil
-	})
+							prRes, err := tx.Run(ctx, pageRankQuery, nil)
+							if err != nil {
+											return nil, err
+							}
+							for prRes.Next(ctx) {
+											id, _ := prRes.Record().Get("shardID")
+											score, _ := prRes.Record().Get("score")
+											if m, ok := newCache[id.(string)]; ok {
+															m.PageRank = score.(float64)
+															newCache[id.(string)] = m
+											}
+							}
 
-	return count, err
+							_, _ = tx.Run(ctx, dropQuery, nil)
+							return nil, nil
+			})
+
+			if err != nil {
+							return 0, err
+			}
+
+			// Delta write — only nodes whose values changed
+			communityCacheMu.RLock()
+			old := communityCache
+			communityCacheMu.RUnlock()
+
+			var updates []map[string]any
+			for id, newM := range newCache {
+							if old == nil || old[id] != newM {
+											updates = append(updates, map[string]any{
+															"id":        id,
+															"community": newM.CommunityID,
+															"pagerank":  newM.PageRank,
+											})
+							}
+			}
+
+			if len(updates) > 0 {
+							writeQuery := `
+							UNWIND $updates AS u
+							MATCH (s:Shard {id: u.id})
+							SET s.community = u.community, s.pagerank = u.pagerank`
+							_, _ = neo4j.ExecuteQuery(ctx, v.driver, writeQuery,
+											map[string]any{"updates": updates},
+											neo4j.EagerResultTransformer,
+											neo4j.ExecuteQueryWithDatabase(v.dbName))
+							log.Printf("[VesselGraph] Community delta-write: %d nodes updated", len(updates))
+			} else {
+							log.Println("[VesselGraph] Community delta-write: no changes — WAL untouched")
+			}
+
+			communityCacheMu.Lock()
+			communityCache = newCache
+			communityCacheMu.Unlock()
+
+			return len(newCache), nil
 }
 
 func nodeToShard(node neo4j.Node) Shard {
@@ -421,6 +474,17 @@ func nodeToShard(node neo4j.Node) Shard {
 		CreatedAt:   ca,
 		UseCount:    useCount,
 	}
+}
+
+func nodeToShardWithCache(node neo4j.Node) Shard {
+	s := nodeToShard(node)
+	communityCacheMu.RLock()
+	if m, ok := communityCache[s.ID]; ok {
+		s.CommunityID = m.CommunityID
+		s.PageRank = m.PageRank
+	}
+	communityCacheMu.RUnlock()
+	return s
 }
 
 // Implement the rest of the interface (GetAllShards, GetCount, Close, etc.) to satisfy Repository
@@ -519,7 +583,7 @@ func (v *VesselGraph) GetAllShards(ctx context.Context) ([]Shard, error) {
 	for _, record := range result.Records {
 		node, _ := record.Get("s")
 		degree, _ := record.Get("degree")
-		shard := nodeToShard(node.(neo4j.Node))
+		shard := nodeToShardWithCache(node.(neo4j.Node))
 		shard.BondCount = int(degree.(int64))
 		shards = append(shards, shard)
 	}
