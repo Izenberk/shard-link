@@ -555,7 +555,26 @@ func (v *Vessel) SaveActivity(ctx context.Context, entry ShardActivity) error {
 	stmt.BindText(2, entry.Message)
 	stmt.BindText(3, entry.ShardID)
 
-	return stmt.Exec()
+	if err := stmt.Exec(); err != nil {
+		return err
+	}
+
+	// TTL purge — keep last N days only
+	retentionDays := os.Getenv("ACTIVITY_LOG_RETENTION_DAYS")
+	if retentionDays == "" {
+		retentionDays = "7"
+	}
+
+	purge, _, _ := v.conn.Prepare(
+		`DELETE FROM activity_logs WHERE timestamp < datetime('now', '-' || ? || ' days')`,
+	)
+	if purge != nil {
+		defer purge.Close()
+		purge.BindText(1, retentionDays)
+		_ = purge.Exec()
+	}
+
+	return nil
 }
 
 func (v *Vessel) GetRecentActivity(ctx context.Context, limit int) ([]ShardActivity, error) {

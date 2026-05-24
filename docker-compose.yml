@@ -23,6 +23,13 @@ services:
       - EMBEDDING_MODEL=${EMBEDDING_MODEL}
       - MESH_LINK_THRESHOLD=${MESH_LINK_THRESHOLD:-0.75}
       - JANITOR_RESONANCE_THRESHOLD=${JANITOR_RESONANCE_THRESHOLD:-0.70}
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+
     ports:
       - "8080:8080"
     restart: unless-stopped
@@ -38,6 +45,13 @@ services:
       - POSTGRES_DB=shardlink
       - POSTGRES_USER=sharduser
       - POSTGRES_PASSWORD=shardpass
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+
     volumes:
       - ./postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
@@ -60,6 +74,13 @@ services:
       - NEO4J_server_memory_heap_initial__size=1G
       - NEO4J_server_memory_heap_max__size=2G
       - NEO4J_server_memory_pagecache_size=1G
+      # Log rotation: handled by Docker json-file driver below (neo4j_logs/ bind mount is <30MB)
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
     volumes:
       - ./neo4j_data:/data
       - ./neo4j_logs:/logs
