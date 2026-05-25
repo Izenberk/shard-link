@@ -42,10 +42,12 @@ func ReciprocalRankFusion(limit int, k float64, lists ...[]Shard) []Shard {
 		return sorted[i].score > sorted[j].score
 	})
 
-	// 4. Collect the top results up to the limit
+	// 4. Collect the top results up to the limit, wiring fusion score to Confidence
 	var result []Shard
 	for i := 0; i < len(sorted) && i < limit; i++ {
-		result = append(result, shardMap[sorted[i].id])
+		shard := shardMap[sorted[i].id]
+		shard.Confidence = sorted[i].score
+		result = append(result, shard)
 	}
 
 	return result

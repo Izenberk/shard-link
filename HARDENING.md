@@ -948,7 +948,7 @@ go run cmd/check\_mesh/main.go
 
 Fully shipped features with known constraints. No correctness risk. Start after Phase 4 is verified.
 
-- [ ] **5.1 search\_all parallel engine calls** — `internal/mcp/server.go`
+- [x] **5.1 search\_all parallel engine calls** — `internal/mcp/server.go`
 
 **Why:** Text, vector, and graph calls in `handleSearchAll()` run sequentially. Latency \= sum of all three. Fix: fan out via `sync.WaitGroup`, merge under mutex.
 
@@ -1028,7 +1028,7 @@ for id := range seenShards { ids \= append(ids, id) }
 
 \_ \= s.vessel.ReinforceShards(ctx, ids)
 
-- [ ] **5.2 Confidence field wired through RRF** — `internal/storage/rrf.go`
+- [x] **5.2 Confidence field wired through RRF** — `internal/storage/rrf.go`
 
 **Why:** `Confidence` exists on the `Shard` struct and schema but the RRF output never populates it. MCP callers receive `Confidence: 0` on all `search_all` results — useless for confidence-filtered retrieval downstream.
 
@@ -1040,7 +1040,7 @@ shard.Confidence \= sorted\[i\].score  // wire fusion score → Confidence
 
 result \= append(result, shard)
 
-- [ ] **5.3 MMR lambda as MCP param and env var** — `internal/mcp/server.go` \+ `main.go`
+- [x] **5.3 MMR lambda as MCP param and env var** — `internal/mcp/server.go` \+ `main.go`
 
 **Why:** Lambda is hardcoded to 0.7. Cannot be tuned per-query or per-deployment without a code change.
 
@@ -1070,7 +1070,7 @@ Add to `.env.example`:
 
 MMR\_LAMBDA=0.7
 
-- [ ] **5.4 Auth middleware rate limiting** — `internal/mcp/server.go`
+- [x] **5.4 Auth middleware rate limiting** — `internal/mcp/server.go`
 
 **Why:** `withAuth()` validates `X-API-Key` but has no per-key request rate cap. Cloudflare provides edge-level DDoS protection but nothing at the application layer.
 
@@ -1189,10 +1189,10 @@ Genuine new feature work. Not bug fixes, not hardening. Do not start until Phase
 | 3.1 | Named Docker volumes | Medium | DEFERRED to Phase 6.5 (K8s). Bind mounts provide better host visibility for ops. |
 | 4.1 | Janitor fallback fix | Low | ALREADY FIXED. Current code had the resonance filter. |
 | 4.2 | SearchGraph degree fix | Low | SHIPPED. Neighbor degree subquery + Go parsing. |
-| 5.1 | search\_all goroutines | Low | Isolated to `handleSearchAll()`. No shared state risk. |
-| 5.2 | RRF Confidence wire | Low | Single return value addition in `rrf.go`. |
-| 5.3 | MMR lambda param | Low | Additive MCP param with fallback default. |
-| 5.4 | Rate limiting | Low | Additive middleware. Remove cleanly if issues arise. |
+| 5.1 | search\_all goroutines | Low | SHIPPED. Parallel fan-out with WaitGroup + mutex merge. |
+| 5.2 | RRF Confidence wire | Low | SHIPPED. Fusion score wired to shard.Confidence. |
+| 5.3 | MMR lambda param | Low | SHIPPED. MCP param with env var fallback (MMR\_LAMBDA). |
+| 5.4 | Rate limiting | Low | SHIPPED. Per-key 60 req/min, burst 10 via x/time/rate. |
 
 ---
 
@@ -1208,4 +1208,4 @@ Genuine new feature work. Not bug fixes, not hardening. Do not start until Phase
 
 ---
 
-*Status: PHASE 4 COMPLETE — PHASE 5 NEXT | Date: 2026-05-25* *Authors: BB & Brainy Bestie*  
+*Status: PHASE 5 COMPLETE — PHASE 6 (NEW FEATURES) NEXT | Date: 2026-05-25* *Authors: BB & Brainy Bestie*  

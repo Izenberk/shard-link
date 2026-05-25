@@ -6,11 +6,15 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/izenberk/shard-link/internal/storage"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"golang.org/x/time/rate"
 )
 
 type MCPServer struct {
@@ -49,6 +53,23 @@ func NewMCPServer(v storage.Repository, apiKey string, e storage.Embedder) *MCPS
 	return mcpSrv
 }
 
+// Rate limiting — per API key, 60 req/min with burst of 10
+var (
+	rateLimiters   = make(map[string]*rate.Limiter)
+	rateLimitersMu sync.Mutex
+)
+
+func getLimiter(key string) *rate.Limiter {
+	rateLimitersMu.Lock()
+	defer rateLimitersMu.Unlock()
+	if lim, ok := rateLimiters[key]; ok {
+		return lim
+	}
+	lim := rate.NewLimiter(rate.Every(time.Minute/60), 10)
+	rateLimiters[key] = lim
+	return lim
+}
+
 func (s *MCPServer) withAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Log all incoming requests to debug session/auth issues
@@ -67,6 +88,16 @@ func (s *MCPServer) withAuth(next http.Handler) http.Handler {
 			return
 		}
 
+		// Rate limiting — per API key
+		key := r.Header.Get("X-API-Key")
+		if key == "" {
+			key = r.RemoteAddr
+		}
+		if !getLimiter(key).Allow() {
+			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+			return
+		}
+
 		next.ServeHTTP(w, r)
 	})
 }
@@ -78,6 +109,7 @@ func (s *MCPServer) RegisterTools() {
 		mcp.WithString("query_text", mcp.Description("Natural language query to embed")),
 		mcp.WithString("query_vector", mcp.Description("Base64 encoded float32 vector (optional if query_text is provided)")),
 		mcp.WithNumber("limit", mcp.Description("Max results to return")),
+		mcp.WithNumber("lambda", mcp.Description("MMR diversity tuning (0.0=max diversity, 1.0=max relevance). Default: 0.7")),
 	)
 	s.mcp.AddTool(searchTool, s.handleSearch)
 
@@ -136,29 +168,51 @@ func (s *MCPServer) handleSearchAll(ctx context.Context, request mcp.CallToolReq
 		}
 	}
 
-	// Deduplication map
-	seenShards := make(map[string]storage.Shard)
-	var allBonds []storage.ShardBond
+	// Parallel fan-out across all engines
+	var (
+		mu         sync.Mutex
+		seenShards = make(map[string]storage.Shard)
+		allBonds   []storage.ShardBond
+		wg         sync.WaitGroup
+	)
 
-	// A. Text Search (Don't touch yet)
-	textShards, _ := s.vessel.FindText(ctx, query, limit, false)
-	for _, shard := range textShards {
-		seenShards[shard.ID] = shard
-	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		results, _ := s.vessel.FindText(ctx, query, limit, false)
+		mu.Lock()
+		for _, sh := range results {
+			seenShards[sh.ID] = sh
+		}
+		mu.Unlock()
+	}()
 
-	// B. Vector & Graph Search (Don't touch yet)
 	if queryVec != nil {
-		gShards, gBonds, _ := s.vessel.SearchGraph(ctx, queryVec, limit, false)
-		for _, shard := range gShards {
-			seenShards[shard.ID] = shard
-		}
-		allBonds = append(allBonds, gBonds...)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results, _ := s.vessel.FindResonant(ctx, queryVec, limit, false)
+			mu.Lock()
+			for _, sh := range results {
+				seenShards[sh.ID] = sh
+			}
+			mu.Unlock()
+		}()
 
-		vShards, _ := s.vessel.FindResonant(ctx, queryVec, limit, false)
-		for _, shard := range vShards {
-			seenShards[shard.ID] = shard
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			gShards, gBonds, _ := s.vessel.SearchGraph(ctx, queryVec, limit, false)
+			mu.Lock()
+			for _, sh := range gShards {
+				seenShards[sh.ID] = sh
+			}
+			allBonds = append(allBonds, gBonds...)
+			mu.Unlock()
+		}()
 	}
+
+	wg.Wait()
 
 	if len(seenShards) == 0 {
 		return mcp.NewToolResultText("No matching memory shards found across any engine."), nil
@@ -292,6 +346,15 @@ func (s *MCPServer) handleSearch(ctx context.Context, request mcp.CallToolReques
 		log.Printf("[MCP ERROR] search_memory failed: %v", err)
 		return nil, err
 	}
+
+	// MMR diversity re-ranking
+	lambda := request.GetFloat("lambda", 0.7)
+	if envL := os.Getenv("MMR_LAMBDA"); lambda == 0.7 && envL != "" {
+		if parsed, err := strconv.ParseFloat(envL, 64); err == nil {
+			lambda = parsed
+		}
+	}
+	results = storage.MaximalMarginalRelevance(queryVec, results, limit, lambda)
 
 	var response string
 	for _, shard := range results {
