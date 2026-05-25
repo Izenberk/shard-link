@@ -697,7 +697,11 @@ func (v *VesselGraph) SearchGraph(ctx context.Context, queryVector []byte, limit
 		SET neighbor.last_used = datetime(),
 			neighbor.use_count = coalesce(neighbor.use_count, 0) + 1
 		WITH center, neighbor, r
-		RETURN center, count(r) as centerDegree, collect({node: neighbor, weight: r.weight}) as neighbors
+		OPTIONAL MATCH (neighbor)-[nr:CONNECTED_TO]-()
+		WITH center, neighbor, r, count(nr) AS neighborDegree
+		RETURN center,
+		       count(r) AS centerDegree,
+		       collect({node: neighbor, weight: r.weight, degree: neighborDegree}) AS neighbors
 		`
 	} else {
 		query = `
@@ -706,7 +710,11 @@ func (v *VesselGraph) SearchGraph(ctx context.Context, queryVector []byte, limit
 		WITH center
 		OPTIONAL MATCH (center)-[r:CONNECTED_TO]-(neighbor:Shard)
 		WITH center, neighbor, r
-		RETURN center, count(r) as centerDegree, collect({node: neighbor, weight: r.weight}) as neighbors
+		OPTIONAL MATCH (neighbor)-[nr:CONNECTED_TO]-()
+		WITH center, neighbor, r, count(nr) AS neighborDegree
+		RETURN center,
+		       count(r) AS centerDegree,
+		       collect({node: neighbor, weight: r.weight, degree: neighborDegree}) AS neighbors
 		`
 	}
 	params := map[string]any{
@@ -742,9 +750,9 @@ func (v *VesselGraph) SearchGraph(ctx context.Context, queryVector []byte, limit
 			}
 			
 			neighborShard := nodeToShard(neighborNode.(neo4j.Node))
-			// Note: neighborShard.BondCount is NOT populated here because it requires another query or a complex subquery.
-			// However, since it's a neighbor, we know it has at least 1 bond (to the center).
-			// For now, let's keep it simple and populate it in GetAllShards for the full graph view.
+			if deg, ok := m["degree"].(int64); ok {
+				neighborShard.BondCount = int(deg)
+			}
 			
 			if !seen[neighborShard.ID] {
 				shards = append(shards, neighborShard)

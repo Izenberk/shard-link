@@ -698,7 +698,7 @@ docker compose logs hub | grep "\\\[Hygiene\\\]"
 
 Optional but required before declaring the storage issue fully resolved. Do not start until Phase 2 is verified stable for at least 24 hours.
 
-- [ ] **3.1 Named Docker volumes for Neo4j** — replace bind mounts in `docker-compose.yml`:
+- [ ] **3.1 Named Docker volumes for Neo4j** *(DEFERRED to Phase 6.5 — K8s migration)* — replace bind mounts in `docker-compose.yml`:
 
 **Why:** Bind mounts have no size governance at the Docker layer. Named volumes enable `docker system df` tracking and future size cap policies.
 
@@ -742,7 +742,7 @@ docker compose up \-d \--build
 
 docker exec shard-link\_hub /migrate
 
-- [ ] **3.2 Full `.env.example` audit** — confirm all tunables are documented:
+- [x] **3.2 Full `.env.example` audit** — confirm all tunables are documented:
 
 \# ─── Hub ────────────────────────────────────────────────────────
 
@@ -794,7 +794,7 @@ HYGIENE\_INTERVAL\_HOURS=24
 
 CLOUDFLARE\_TUNNEL\_TOKEN=your\_token\_here
 
-- [ ] **3.3 Verify Phase 3 success criteria:**
+- [x] **3.3 Verify Phase 3 success criteria:**
 
 \# Neo4j logs capped
 
@@ -834,7 +834,7 @@ docker system df
 
 These fix actual bugs — wrong data returned or wrong shards evicted. All are single-file surgical changes. Start after Phase 3 success criteria are met.
 
-- [ ] **4.1 Janitor GDS fallback — resonance filter missing** — `internal/storage/vessel_graph.go`
+- [x] **4.1 Janitor GDS fallback — resonance filter missing** *(ALREADY FIXED — current code has the filter)* — `internal/storage/vessel_graph.go`
 
 **Why:** When the GDS projection fails (e.g. no relationships exist yet), `GetEvictionCandidates()` falls through to a degree-centrality fallback. That fallback does NOT apply the resonance threshold filter — a shard with high cosine similarity to a core shard can be evicted silently.
 
@@ -886,7 +886,7 @@ RETURN s.id
 
 params := map\[string\]any{"limit": limit, "threshold": threshold}
 
-- [ ] **4.2 Neighbor BondCount unpopulated in SearchGraph** — `internal/storage/vessel_graph.go`
+- [x] **4.2 Neighbor BondCount unpopulated in SearchGraph** — `internal/storage/vessel_graph.go`
 
 **Why:** In `SearchGraph()`, the center shard gets `BondCount` via `centerDegree` but neighbor shards are built from `collect({node: neighbor, weight: r.weight})` with no degree info. Dashboard survival scores treat all neighbors as orphans.
 
@@ -932,7 +932,7 @@ In Go result parsing, add:
 
 neighborShard.BondCount \= int(m\["degree"\].(int64))
 
-- [ ] **4.3 Verify Phase 4** — run janitor manually and confirm resonant shards are protected:
+- [x] **4.3 Verify Phase 4** — run janitor manually and confirm resonant shards are protected:
 
 \# Trigger a Janitor cycle via log inspection
 
@@ -1186,9 +1186,9 @@ Genuine new feature work. Not bug fixes, not hardening. Do not start until Phase
 | 1.2 | SQLite TTL purge | Low | SHIPPED. Scoped to `activity_logs`. Core shards unaffected. |
 | 2.1 | GDS stream mode | Medium | SHIPPED. Delta-write confirmed: 40 nodes on first run, WAL untouched on stable mesh. |
 | 2.3 | HygieneWorker | Low | SHIPPED. Additive goroutine. 24h interval, all three vessels. |
-| 3.1 | Named Docker volumes | Medium | Requires data migration. Back up `neo4j_data/` first. |
-| 4.1 | Janitor fallback fix | Low | Single query change. No interface changes. |
-| 4.2 | SearchGraph degree fix | Low | Query extension only. Additive. |
+| 3.1 | Named Docker volumes | Medium | DEFERRED to Phase 6.5 (K8s). Bind mounts provide better host visibility for ops. |
+| 4.1 | Janitor fallback fix | Low | ALREADY FIXED. Current code had the resonance filter. |
+| 4.2 | SearchGraph degree fix | Low | SHIPPED. Neighbor degree subquery + Go parsing. |
 | 5.1 | search\_all goroutines | Low | Isolated to `handleSearchAll()`. No shared state risk. |
 | 5.2 | RRF Confidence wire | Low | Single return value addition in `rrf.go`. |
 | 5.3 | MMR lambda param | Low | Additive MCP param with fallback default. |
@@ -1208,4 +1208,4 @@ Genuine new feature work. Not bug fixes, not hardening. Do not start until Phase
 
 ---
 
-*Status: PHASE 2 COMPLETE — PHASE 3 NEXT | Date: 2026-05-25* *Authors: BB & Brainy Bestie*  
+*Status: PHASE 4 COMPLETE — PHASE 5 NEXT | Date: 2026-05-25* *Authors: BB & Brainy Bestie*  
