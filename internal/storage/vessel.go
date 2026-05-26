@@ -604,8 +604,12 @@ func (v *Vessel) GetRecentActivity(ctx context.Context, limit int) ([]ShardActiv
 	return logs, stmt.Err()
 }
 
-func (v *Vessel) CalculateCommunities(ctx context.Context) (int, error) {
-	return 0, nil
+func (v *Vessel) CalculateCommunities(ctx context.Context) (int, []int64, error) {
+	return 0, nil, nil
+}
+
+func (v *Vessel) GetShardsByCommunity(ctx context.Context, communityID int64) ([]Shard, error) {
+	return nil, nil
 }
 
 // Optimize runs maintenance tasks to reclaim space and update statistics

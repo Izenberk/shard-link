@@ -24,7 +24,8 @@ type Repository interface {
 	// Mesh Intelligence
 	SearchGraph(ctx context.Context, queryVector []byte, limit int, shouldTouch bool) ([]Shard, []ShardBond, error)
 	GetGraphData(ctx context.Context) ([]Shard, []ShardBond, error)
-	CalculateCommunities(ctx context.Context) (int, error)
+	CalculateCommunities(ctx context.Context) (int, []int64, error)
+	GetShardsByCommunity(ctx context.Context, communityID int64) ([]Shard, error)
 	SyncBonds(ctx context.Context, threshold float64) (int, error)
 	ReinforceShards(ctx context.Context, ids []string) error
 

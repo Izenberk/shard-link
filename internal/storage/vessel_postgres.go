@@ -405,9 +405,13 @@ func (v *PostgresVessel) GetGraphData(ctx context.Context) ([]Shard, []ShardBond
 	return shards, bonds, nil
 }
 
-func (v *PostgresVessel) CalculateCommunities(ctx context.Context) (int, error) {
+func (v *PostgresVessel) CalculateCommunities(ctx context.Context) (int, []int64, error) {
 	// Postgres fallback (no native Louvain)
-	return 0, nil
+	return 0, nil, nil
+}
+
+func (v *PostgresVessel) GetShardsByCommunity(ctx context.Context, communityID int64) ([]Shard, error) {
+	return nil, nil
 }
 
 // Optimize runs Postgres-specific maintenance routines

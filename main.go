@@ -86,13 +86,13 @@ func main() {
 
 	// 3. Summon the Servants (Janitor & Synthesizer)
 	jan := janitor.NewJanitor(v, 15*time.Minute, 1000)
-	syn := synthesizer.NewSynthesizer(v, 10*time.Minute)
+
+	// Synthesizer wiring is deferred until after embedder init (step 5)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	go jan.Run(ctx)
-	go syn.Run(ctx)
 
 	// 4. Summon the HygieneWorker (Storage Maintenance)
 	graphV, _ := v.(*storage.VesselGraph)
@@ -146,6 +146,30 @@ func main() {
 		emb = storage.NewMockEmbedder(3072)
 		log.Println("SHARD-LINK: Intelligence is in 'Manual/Mock' mode (No embedding)")
 	}
+
+	// 5.5 Initialize Summarizer and launch Synthesizer
+	var sum storage.Summarizer
+	switch mode {
+	case "server":
+		sumModel := os.Getenv("SUMMARIZER_MODEL")
+		if sumModel == "" {
+			sumModel = "gemini-2.0-flash"
+		}
+		geminiKey := os.Getenv("GEMINI_API_KEY")
+		geminiSum, err := storage.NewGeminiSummarizer(ctx, geminiKey, sumModel)
+		if err != nil {
+			log.Printf("WARNING: Failed to ignite Summarizer: %v. Community summaries disabled.", err)
+			sum = storage.NewMockSummarizer()
+		} else {
+			sum = geminiSum
+			log.Printf("SHARD-LINK: Community Summarizer Active (%s)", sumModel)
+		}
+	default:
+		sum = storage.NewMockSummarizer()
+	}
+
+	syn := synthesizer.NewSynthesizer(v, 10*time.Minute, emb, sum)
+	go syn.Run(ctx)
 
 	// 6. Launch the Authenticated Bridge
 	srv := mcp.NewMCPServer(v, apiKey, emb)

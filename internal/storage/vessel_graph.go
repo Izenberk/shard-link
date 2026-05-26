@@ -293,100 +293,134 @@ func (v *VesselGraph) GetEvictionCandidates(ctx context.Context, limit int) ([]s
 
 // Helpers
 
-func (v *VesselGraph) CalculateCommunities(ctx context.Context) (int, error) {
-			const cleanupQuery = `CALL gds.graph.drop('communityGraph', false)`
-			const projectQuery = `
-			CALL gds.graph.project('communityGraph', 'Shard', 'CONNECTED_TO', {
-							relationshipProperties: 'weight'
-			}) YIELD graphName`
-			const louvainQuery = `
-			CALL gds.louvain.stream('communityGraph')
-			YIELD nodeId, communityId
-			RETURN gds.util.asNode(nodeId).id AS shardID, communityId`
-			const pageRankQuery = `
-			CALL gds.pageRank.stream('communityGraph')
-			YIELD nodeId, score
-			RETURN gds.util.asNode(nodeId).id AS shardID, score`
-			const dropQuery = `CALL gds.graph.drop('communityGraph', false)`
+func (v *VesselGraph) CalculateCommunities(ctx context.Context) (int, []int64, error) {
+	const cleanupQuery = `CALL gds.graph.drop('communityGraph', false)`
+	const projectQuery = `
+	CALL gds.graph.project('communityGraph', 'Shard', 'CONNECTED_TO', {
+		relationshipProperties: 'weight'
+	}) YIELD graphName`
+	const louvainQuery = `
+	CALL gds.louvain.stream('communityGraph')
+	YIELD nodeId, communityId
+	RETURN gds.util.asNode(nodeId).id AS shardID, communityId`
+	const pageRankQuery = `
+	CALL gds.pageRank.stream('communityGraph')
+	YIELD nodeId, score
+	RETURN gds.util.asNode(nodeId).id AS shardID, score`
+	const dropQuery = `CALL gds.graph.drop('communityGraph', false)`
 
-			session := v.driver.NewSession(ctx, neo4j.SessionConfig{DatabaseName: v.dbName})
-			defer session.Close(ctx)
+	session := v.driver.NewSession(ctx, neo4j.SessionConfig{DatabaseName: v.dbName})
+	defer session.Close(ctx)
 
-			newCache := make(map[string]CommunityMetrics)
+	newCache := make(map[string]CommunityMetrics)
 
-			_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-							_, _ = tx.Run(ctx, cleanupQuery, nil)
+	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		_, _ = tx.Run(ctx, cleanupQuery, nil)
 
-							if _, err := tx.Run(ctx, projectQuery, nil); err != nil {
-											return nil, err
-							}
+		if _, err := tx.Run(ctx, projectQuery, nil); err != nil {
+			return nil, err
+		}
 
-							lRes, err := tx.Run(ctx, louvainQuery, nil)
-							if err != nil {
-											return nil, err
-							}
-							for lRes.Next(ctx) {
-											id, _ := lRes.Record().Get("shardID")
-											comm, _ := lRes.Record().Get("communityId")
-											newCache[id.(string)] = CommunityMetrics{CommunityID: comm.(int64)}
-							}
+		lRes, err := tx.Run(ctx, louvainQuery, nil)
+		if err != nil {
+			return nil, err
+		}
+		for lRes.Next(ctx) {
+			id, _ := lRes.Record().Get("shardID")
+			comm, _ := lRes.Record().Get("communityId")
+			newCache[id.(string)] = CommunityMetrics{CommunityID: comm.(int64)}
+		}
 
-							prRes, err := tx.Run(ctx, pageRankQuery, nil)
-							if err != nil {
-											return nil, err
-							}
-							for prRes.Next(ctx) {
-											id, _ := prRes.Record().Get("shardID")
-											score, _ := prRes.Record().Get("score")
-											if m, ok := newCache[id.(string)]; ok {
-															m.PageRank = score.(float64)
-															newCache[id.(string)] = m
-											}
-							}
+		prRes, err := tx.Run(ctx, pageRankQuery, nil)
+		if err != nil {
+			return nil, err
+		}
+		for prRes.Next(ctx) {
+			id, _ := prRes.Record().Get("shardID")
+			score, _ := prRes.Record().Get("score")
+			if m, ok := newCache[id.(string)]; ok {
+				m.PageRank = score.(float64)
+				newCache[id.(string)] = m
+			}
+		}
 
-							_, _ = tx.Run(ctx, dropQuery, nil)
-							return nil, nil
+		_, _ = tx.Run(ctx, dropQuery, nil)
+		return nil, nil
+	})
+
+	if err != nil {
+		return 0, nil, err
+	}
+
+	// Delta write — only nodes whose values changed
+	communityCacheMu.RLock()
+	old := communityCache
+	communityCacheMu.RUnlock()
+
+	var updates []map[string]any
+	for id, newM := range newCache {
+		if old == nil || old[id] != newM {
+			updates = append(updates, map[string]any{
+				"id":        id,
+				"community": newM.CommunityID,
+				"pagerank":  newM.PageRank,
 			})
+		}
+	}
 
-			if err != nil {
-							return 0, err
-			}
+	if len(updates) > 0 {
+		writeQuery := `
+		UNWIND $updates AS u
+		MATCH (s:Shard {id: u.id})
+		SET s.community = u.community, s.pagerank = u.pagerank`
+		_, _ = neo4j.ExecuteQuery(ctx, v.driver, writeQuery,
+			map[string]any{"updates": updates},
+			neo4j.EagerResultTransformer,
+			neo4j.ExecuteQueryWithDatabase(v.dbName))
+		log.Printf("[VesselGraph] Community delta-write: %d nodes updated", len(updates))
+	} else {
+		log.Println("[VesselGraph] Community delta-write: no changes — WAL untouched")
+	}
 
-			// Delta write — only nodes whose values changed
-			communityCacheMu.RLock()
-			old := communityCache
-			communityCacheMu.RUnlock()
+	communityCacheMu.Lock()
+	communityCache = newCache
+	communityCacheMu.Unlock()
 
-			var updates []map[string]any
-			for id, newM := range newCache {
-							if old == nil || old[id] != newM {
-											updates = append(updates, map[string]any{
-															"id":        id,
-															"community": newM.CommunityID,
-															"pagerank":  newM.PageRank,
-											})
-							}
-			}
+	// Extract unique community IDs from the updates (changed communities only)
+	seen := make(map[int64]bool)
+	var changedCommunities []int64
+	for _, u := range updates {
+		cid := u["community"].(int64)
+		if !seen[cid] {
+			seen[cid] = true
+			changedCommunities = append(changedCommunities, cid)
+		}
+	}
 
-			if len(updates) > 0 {
-							writeQuery := `
-							UNWIND $updates AS u
-							MATCH (s:Shard {id: u.id})
-							SET s.community = u.community, s.pagerank = u.pagerank`
-							_, _ = neo4j.ExecuteQuery(ctx, v.driver, writeQuery,
-											map[string]any{"updates": updates},
-											neo4j.EagerResultTransformer,
-											neo4j.ExecuteQueryWithDatabase(v.dbName))
-							log.Printf("[VesselGraph] Community delta-write: %d nodes updated", len(updates))
-			} else {
-							log.Println("[VesselGraph] Community delta-write: no changes — WAL untouched")
-			}
+	return len(newCache), changedCommunities, nil
+}
 
-			communityCacheMu.Lock()
-			communityCache = newCache
-			communityCacheMu.Unlock()
+func (v *VesselGraph) GetShardsByCommunity(ctx context.Context, communityID int64) ([]Shard, error) {
+	query := `
+	MATCH (s:Shard {community: $communityID})
+	WHERE s.category <> 'archived'
+	RETURN s
+	ORDER BY s.pagerank DESC
+	`
+	result, err := neo4j.ExecuteQuery(ctx, v.driver, query,
+		map[string]any{"communityID": communityID},
+		neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithDatabase(v.dbName))
+	if err != nil {
+		return nil, err
+	}
 
-			return len(newCache), nil
+	var shards []Shard
+	for _, record := range result.Records {
+		node, _ := record.Get("s")
+		shards = append(shards, nodeToShard(node.(neo4j.Node)))
+	}
+	return shards, nil
 }
 
 func nodeToShard(node neo4j.Node) Shard {

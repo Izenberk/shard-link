@@ -160,7 +160,7 @@ func main() {
 	// 1. Background Analysis (Phase 10: Standalone Intelligence)
 	go func() {
 		log.Println("[Background] Starting initial mesh analysis...")
-		srv.vessel.CalculateCommunities(ctx)
+		_, _, _ = srv.vessel.CalculateCommunities(ctx)
 		log.Println("[Background] Mesh analysis complete.")
 	}()
 
