@@ -153,7 +153,7 @@ func main() {
 	case "server":
 		sumModel := os.Getenv("SUMMARIZER_MODEL")
 		if sumModel == "" {
-			sumModel = "gemini-2.0-flash"
+			sumModel = "gemini-2.5-flash"
 		}
 		geminiKey := os.Getenv("GEMINI_API_KEY")
 		geminiSum, err := storage.NewGeminiSummarizer(ctx, geminiKey, sumModel)

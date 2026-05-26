@@ -404,6 +404,7 @@ func (v *VesselGraph) GetShardsByCommunity(ctx context.Context, communityID int6
 	query := `
 	MATCH (s:Shard {community: $communityID})
 	WHERE s.category <> 'archived'
+	  AND NOT s.id STARTS WITH 'comm-summary-'
 	RETURN s
 	ORDER BY s.pagerank DESC
 	`
