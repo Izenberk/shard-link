@@ -60,7 +60,9 @@ docker compose --profile local up -d --build
 - **Shards:** Atomic contextual fragments (3072-D vectors).
 - **Knowledge Mesh:** A relational graph where shards are nodes and semantic similarities are edges.
 - **Autonomous Memory (Phase 11):** Proactive link creation and mesh maintenance.
+- **Community Summaries (GraphRAG):** LLM-generated paragraph-level summaries of shard clusters, enabling multi-resolution retrieval (micro = shard, macro = community).
 - **The Janitor:** Background process for size management using the **Survival Formula**.
+- **The Synthesizer:** Background service that autonomously bonds resonant shards, recalculates communities (Louvain), and generates community summaries via Gemini.
 - **Silicon Activity Feed:** A real-time terminal in the dashboard providing a persistent, interactive audit trail of all system actions.
 
 ### Survival Score (0-100):
@@ -171,5 +173,18 @@ Shard-Link is built for production-grade stability across disparate environments
 - **Tunnel Stability:** MCP connections are protected by aggressive 10-second heartbeats (`server.WithHeartbeatInterval`), preventing Cloudflare and other edge proxies from dropping idle sessions. Both Streamable HTTP (`/mcp`) and legacy SSE (`/sse`) transports benefit from this.
 - **Asynchronous Thinking:** Intensive graph operations (Louvain communities) are offloaded to background goroutines, ensuring the semantic search tools remain responsive under load.
 
+## 12. Community Summaries (GraphRAG)
+
+The Synthesizer generates macro-level context for shard clusters using LLM summarization:
+
+1. **Bond Detection:** Every 10 minutes, `SyncBonds` discovers new semantic relationships (cosine similarity > threshold).
+2. **Community Detection:** Louvain clustering (Neo4j GDS) groups bonded shards into neighborhoods. A delta cache ensures only changed communities trigger work.
+3. **Summarization:** For each changed community with 2+ members, the top 15 shards (by PageRank) are sent to Gemini 2.5 Flash, which produces a cohesive paragraph summary.
+4. **Embedding & Storage:** The summary is embedded (3072-D vector) and saved as a `core` shard with a deterministic ID (`comm-summary-{communityID}`). MERGE upsert ensures old summaries are overwritten when communities evolve.
+
+**Feedback loop prevention:** `GetShardsByCommunity` excludes `comm-summary-*` shards from the prompt input, so summaries can never feed into their own regeneration.
+
+**Fault isolation:** Summarization runs in a detached goroutine with a separate 5-minute timeout. Gemini API failures are logged and skipped — the MCP server is never affected. Rate limiting (2s between calls) respects the Gemini free tier (15 RPM).
+
 ---
-*Status: PHASE 11 COMPLETE (Autonomous Memory + Enhanced Observability) | Transport: Streamable HTTP (MCP 2024-11-05) | Date: 2026-05-22*
+*Status: PHASE 6.1 COMPLETE (GraphRAG Community Summaries) | Transport: Streamable HTTP (MCP 2024-11-05) | Date: 2026-05-27*
