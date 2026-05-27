@@ -9,7 +9,7 @@ Shard-Link treats information not as isolated records, but as a living network o
 ### 2.1 The Shard
 A **Shard** is the atomic unit of Shard-Link. It consists of:
 - **Cognitive Content:** Raw text or data.
-- **Vector Embedding:** High-precision (3072-D) representation in semantic space.
+- **Vector Embedding:** 768-D representation in semantic space (Matryoshka-truncated from Gemini's native 3072-D).
 - **Metadata:** Temporal markers, category tags, and relational metrics.
 
 ### 2.2 Relational Resonance

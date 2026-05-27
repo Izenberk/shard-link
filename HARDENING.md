@@ -58,7 +58,7 @@ Expected culprit distribution for 50 GB:
 | Directory | Suspected Size | Root Cause |
 | :---- | :---- | :---- |
 | `neo4j_data/transactions/` | 20–30 GB | GDS write-back WAL every 10 min, no checkpoint |
-| `neo4j_data/databases/` | 5–10 GB | Graph store \+ 3072-D vector index |
+| `neo4j_data/databases/` | 5–10 GB | Graph store \+ 768-D vector index |
 | `neo4j_logs/` | 2–5 GB | No log rotation config |
 | `postgres_data/` | 5–10 GB | Dead tuples, VACUUM never ran |
 | Docker container logs | 2–5 GB | No log driver size limit |
@@ -1152,13 +1152,11 @@ Genuine new feature work. Not bug fixes, not hardening. Do not start until Phase
 
 **Rough effort:** 2 days.
 
-- [ ] **6.4 Embedding dimension right-sizing** \[Phase 9 continuation\]
+- [x] **6.4 Embedding dimension right-sizing** \[Phase 9 continuation\]
 
-**What:** Migrate from 3072-D (Gemini) to 512-D or 768-D local models when Ollama is the confirmed primary embedder. Candidate models: `bge-small-en-v1.5` (384-D), `nomic-embed-text-v1.5` Matryoshka (512-D).
+**What:** Migrated from 3072-D to 768-D via client-side Matryoshka truncation + L2 normalization. Configurable via `EMBEDDING_DIMENSION` env var. `ensureIndexes()` auto-detects dimension mismatch and recreates Neo4j vector index. `cmd/gen_vec` re-embeds all shards with rate limiting (2s/call for Gemini free tier).
 
-**Blocker:** Requires re-embedding all existing shards. Dual-write window or lazy re-embed on access. Non-trivial migration tooling.
-
-**Rough effort:** 2–3 days including migration tooling.
+**Status:** Implemented. Run `gen_vec` post-deploy to re-embed existing shards.
 
 - [ ] **6.5 Kubernetes deployment** \[H2 2026 roadmap\]
 
@@ -1193,6 +1191,7 @@ Genuine new feature work. Not bug fixes, not hardening. Do not start until Phase
 | 5.2 | RRF Confidence wire | Low | SHIPPED. Fusion score wired to shard.Confidence. |
 | 5.3 | MMR lambda param | Low | SHIPPED. MCP param with env var fallback (MMR\_LAMBDA). |
 | 5.4 | Rate limiting | Low | SHIPPED. Per-key 60 req/min, burst 10 via x/time/rate. |
+| 6.4 | Embedding dimension right-sizing | Medium | SHIPPED. 768-D Matryoshka truncation + L2 normalize. ensureIndexes() auto-detects mismatch and recreates Neo4j vector index. Requires gen_vec re-embed post-deploy. |
 
 ---
 
@@ -1208,4 +1207,4 @@ Genuine new feature work. Not bug fixes, not hardening. Do not start until Phase
 
 ---
 
-*Status: PHASE 5 COMPLETE — PHASE 6 (NEW FEATURES) NEXT | Date: 2026-05-25* *Authors: BB & Brainy Bestie*  
+*Status: PHASE 6.4 COMPLETE — Embedding Dimension Right-Sizing shipped | Date: 2026-05-27* *Authors: BB & Brainy Bestie*

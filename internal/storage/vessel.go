@@ -17,11 +17,19 @@ import (
 //go:embed schema.sql
 var schema string
 
-// Add the Pool
+// vectorDimension controls the pool allocation size.
+// Set via SetVectorDimension() from main.go before any vessel creation.
+var vectorDimension = 768
+
+// SetVectorDimension configures the global vector dimension for pool allocations.
+// Must be called before NewVessel() or any DecodeVector usage.
+func SetVectorDimension(dim int) {
+	vectorDimension = dim
+}
+
 var vectorPool = sync.Pool{
 	New: func() any {
-		// We pre-allocate 3072 slots (Production Gemini Standard)
-		return make([]float32, 3072)
+		return make([]float32, vectorDimension)
 	},
 }
 
@@ -54,11 +62,11 @@ func NewVessel(path string) (*Vessel, error) {
 		v2 := DecodeVector(arg[1].RawBlob())
 
 		defer func() {
-			if v1 != nil && cap(v1) == 3072 {
-				vectorPool.Put(v1[:3072])
+			if v1 != nil && cap(v1) == vectorDimension {
+				vectorPool.Put(v1[:vectorDimension])
 			}
-			if v2 != nil && cap(v2) == 3072 {
-				vectorPool.Put(v2[:3072])
+			if v2 != nil && cap(v2) == vectorDimension {
+				vectorPool.Put(v2[:vectorDimension])
 			}
 		}()
 
@@ -641,7 +649,7 @@ func DecodeVector(b []byte) []float32 {
 	}
 	limit := len(b) / 4
 	var v []float32
-	if limit <= 3072 {
+	if limit <= vectorDimension {
 		v = vectorPool.Get().([]float32)
 		v = v[:limit]
 	} else {

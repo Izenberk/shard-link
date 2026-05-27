@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/izenberk/shard-link/internal/storage"
@@ -37,7 +38,14 @@ func main() {
 		log.Fatal("GEMINI_API_KEY is not set")
 	}
 
-	emb, err := storage.NewGeminiEmbedder(ctx, geminiKey, "gemini-embedding-001")
+	targetDim := 768
+	if dimStr := os.Getenv("EMBEDDING_DIMENSION"); dimStr != "" {
+		if d, err := strconv.Atoi(dimStr); err == nil && d > 0 {
+			targetDim = d
+		}
+	}
+
+	emb, err := storage.NewGeminiEmbedder(ctx, geminiKey, "gemini-embedding-001", targetDim)
 	if err != nil {
 		log.Fatalf("Failed to ignite Cloud Embedder: %v", err)
 	}
@@ -48,12 +56,11 @@ func main() {
 		log.Fatalf("Failed to fetch shards: %v", err)
 	}
 
-	log.Printf(">>> Starting High-Precision Re-Embedding of %d shards...", len(shards))
+	log.Printf(">>> Starting Re-Embedding of %d shards at %d-D...", len(shards), targetDim)
 
 	for i, s := range shards {
 		log.Printf("[%d/%d] Embedding shard: %s", i+1, len(shards), s.ID)
 
-		// Call Gemini API to get real 3072-D vector
 		floats, err := emb.Embed(ctx, s.Content)
 		if err != nil {
 			log.Printf("ERROR: Failed to embed %s: %v", s.ID, err)
@@ -69,7 +76,12 @@ func main() {
 			log.Printf("ERROR: Failed to save %s: %v", s.ID, err)
 			continue
 		}
+
+		// Rate limit: Gemini free tier = 15 RPM → 2s between calls
+		if i < len(shards)-1 {
+			time.Sleep(2 * time.Second)
+		}
 	}
 
-	log.Println(">>> MISSION COMPLETE: All shards now have high-precision 3072-D vectors.")
+	log.Printf(">>> MISSION COMPLETE: All shards now have %d-D vectors.", targetDim)
 }

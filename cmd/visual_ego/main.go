@@ -126,7 +126,13 @@ func main() {
 	if model == "" {
 		model = "gemini-embedding-001"
 	}
-	emb, err := storage.NewGeminiEmbedder(ctx, os.Getenv("GEMINI_API_KEY"), model)
+	targetDim := 768
+	if dimStr := os.Getenv("EMBEDDING_DIMENSION"); dimStr != "" {
+		if d, err := strconv.Atoi(dimStr); err == nil && d > 0 {
+			targetDim = d
+		}
+	}
+	emb, err := storage.NewGeminiEmbedder(ctx, os.Getenv("GEMINI_API_KEY"), model, targetDim)
 	if err != nil {
 		log.Printf("Warning: Failed to init embedder: %v. Search will be limited.", err)
 	}

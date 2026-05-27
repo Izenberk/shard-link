@@ -7,12 +7,22 @@ import (
 	"log"
 	"math"
 	"os"
+	"strconv"
 
 	"github.com/izenberk/shard-link/internal/storage"
 )
 
+var repairDim = 768
+
 func main() {
 	ctx := context.Background()
+
+	// 0. Read target dimension
+	if dimStr := os.Getenv("EMBEDDING_DIMENSION"); dimStr != "" {
+		if d, err := strconv.Atoi(dimStr); err == nil && d > 0 {
+			repairDim = d
+		}
+	}
 
 	// 1. Ignite the Vessel
 	dbPath := os.Getenv("DATABASE_PATH")
@@ -57,11 +67,11 @@ func main() {
 }
 
 func generateMockEmbedding(content string) []float32 {
-	vec := make([]float32, 3072)
+	vec := make([]float32, repairDim)
 	hash := sha256.Sum256([]byte(content))
-	
+
 	// Seed the vector with hash values
-	for i := 0; i < 3072; i++ {
+	for i := 0; i < repairDim; i++ {
 		// Use different parts of the hash to create pseudo-random but deterministic floats
 		start := (i * 7) % (32 - 4)
 		chunk := hash[start : start+4]

@@ -31,8 +31,8 @@ func main() {
 	MATCH (s1:Shard)
 	MATCH (s2:Shard)
 	WHERE elementId(s1) < elementId(s2)
-	  AND size(s1.embedding) = 3072 
-	  AND size(s2.embedding) = 3072
+	  AND size(s1.embedding) > 0
+	  AND size(s1.embedding) = size(s2.embedding)
 	WITH s1, s2, gds.similarity.cosine(s1.embedding, s2.embedding) AS sim
 	WHERE sim > parseFloat($threshold)
 	MERGE (s1)-[r:CONNECTED_TO]->(s2)

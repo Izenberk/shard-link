@@ -57,7 +57,7 @@ docker compose --profile local up -d --build
 - **[Core Context (GEMINI.md)](./GEMINI.md):** Foundational mandates for AI agent integration.
 
 ## 5. Domain Language & Core Concepts
-- **Shards:** Atomic contextual fragments (3072-D vectors).
+- **Shards:** Atomic contextual fragments (768-D vectors).
 - **Knowledge Mesh:** A relational graph where shards are nodes and semantic similarities are edges.
 - **Autonomous Memory (Phase 11):** Proactive link creation and mesh maintenance.
 - **Community Summaries (GraphRAG):** LLM-generated paragraph-level summaries of shard clusters, enabling multi-resolution retrieval (micro = shard, macro = community).
@@ -180,7 +180,7 @@ The Synthesizer generates macro-level context for shard clusters using LLM summa
 1. **Bond Detection:** Every 10 minutes, `SyncBonds` discovers new semantic relationships (cosine similarity > threshold).
 2. **Community Detection:** Louvain clustering (Neo4j GDS) groups bonded shards into neighborhoods. A delta cache ensures only changed communities trigger work.
 3. **Summarization:** For each changed community with 2+ members, the top 15 shards (by PageRank) are sent to Gemini 2.5 Flash, which produces a cohesive paragraph summary.
-4. **Embedding & Storage:** The summary is embedded (3072-D vector) and saved as a `core` shard with a deterministic ID (`comm-summary-{communityID}`). MERGE upsert ensures old summaries are overwritten when communities evolve.
+4. **Embedding & Storage:** The summary is embedded (768-D vector) and saved as a `core` shard with a deterministic ID (`comm-summary-{communityID}`). MERGE upsert ensures old summaries are overwritten when communities evolve.
 
 **Feedback loop prevention:** `GetShardsByCommunity` excludes `comm-summary-*` shards from the prompt input, so summaries can never feed into their own regeneration.
 

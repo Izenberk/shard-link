@@ -58,26 +58,66 @@ func (v *VesselGraph) ExecuteQuery(ctx context.Context, query string, params map
 }
 
 func (v *VesselGraph) ensureIndexes(ctx context.Context) error {
-	// 1. Vector Index for 3072-D embeddings (Production Gemini Standard)
-	vectorQuery := `
+	// Read target dimension from env (must match what main.go sets)
+	dim := 768
+	if dimStr := os.Getenv("EMBEDDING_DIMENSION"); dimStr != "" {
+		if d, err := strconv.Atoi(dimStr); err == nil && d > 0 {
+			dim = d
+		}
+	}
+
+	// 1. Check if existing vector index has a dimension mismatch
+	checkQuery := `
+	SHOW INDEXES
+	WHERE name = 'shard_embeddings'
+	RETURN properties(options) AS opts
+	`
+	checkRes, err := neo4j.ExecuteQuery(ctx, v.driver, checkQuery, nil, neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithDatabase(v.dbName))
+	if err == nil && len(checkRes.Records) > 0 {
+		// Index exists — check dimension
+		needsRecreate := false
+		if opts, ok := checkRes.Records[0].Get("opts"); ok {
+			if m, ok := opts.(map[string]any); ok {
+				if ic, ok := m["indexConfig"].(map[string]any); ok {
+					if existingDim, ok := ic["vector.dimensions"].(int64); ok {
+						if int(existingDim) != dim {
+							log.Printf("[VesselGraph] Vector index dimension mismatch: existing=%d, target=%d — recreating", existingDim, dim)
+							needsRecreate = true
+						}
+					}
+				}
+			}
+		}
+		if needsRecreate {
+			dropQuery := `DROP INDEX shard_embeddings IF EXISTS`
+			if _, err := neo4j.ExecuteQuery(ctx, v.driver, dropQuery, nil, neo4j.EagerResultTransformer,
+				neo4j.ExecuteQueryWithDatabase(v.dbName)); err != nil {
+				return fmt.Errorf("failed to drop old vector index: %w", err)
+			}
+		}
+	}
+
+	// 2. Create vector index at the target dimension
+	vectorQuery := fmt.Sprintf(`
 	CREATE VECTOR INDEX shard_embeddings IF NOT EXISTS
 	FOR (s:Shard) ON (s.embedding)
 	OPTIONS {indexConfig: {
-		` + "`vector.dimensions`" + `: 3072,
-		` + "`vector.similarity_function`" + `: 'cosine'
-	}}`
+		`+"`vector.dimensions`"+`: %d,
+		`+"`vector.similarity_function`"+`: 'cosine'
+	}}`, dim)
 
 	if _, err := neo4j.ExecuteQuery(ctx, v.driver, vectorQuery, nil, neo4j.EagerResultTransformer,
 		neo4j.ExecuteQueryWithDatabase(v.dbName)); err != nil {
 		return err
 	}
 
-	// 2. Full-Text Index for Keyword Retrieval (Global Scale)
+	// 3. Full-Text Index for Keyword Retrieval (Global Scale)
 	ftQuery := `
 	CREATE FULLTEXT INDEX shard_content_ft IF NOT EXISTS
 	FOR (s:Shard) ON EACH [s.content]
 	`
-	_, err := neo4j.ExecuteQuery(ctx, v.driver, ftQuery, nil, neo4j.EagerResultTransformer,
+	_, err = neo4j.ExecuteQuery(ctx, v.driver, ftQuery, nil, neo4j.EagerResultTransformer,
 		neo4j.ExecuteQueryWithDatabase(v.dbName))
 	return err
 }
@@ -128,7 +168,7 @@ func (v *VesselGraph) SaveShard(ctx context.Context, s Shard) error {
 	WHERE new.id <> existing.id
 	  AND new.category <> 'archived'
 	  AND existing.category <> 'archived'
-	  AND size(existing.embedding) = 3072
+	  AND size(existing.embedding) = size(new.embedding)
 	WITH new, existing, gds.similarity.cosine(new.embedding, existing.embedding) AS sim
 	WHERE sim > $threshold
 	MERGE (new)-[r:CONNECTED_TO]-(existing)
@@ -813,8 +853,9 @@ func (v *VesselGraph) SyncBonds(ctx context.Context, threshold float64) (int, er
 	WHERE elementId(s1) < elementId(s2)
 	  AND s1.category <> 'archived'
 	  AND s2.category <> 'archived'
-	  AND size(s1.embedding) = 3072 
-	  AND size(s2.embedding) = 3072
+	  AND size(s1.embedding) > 0
+	  AND size(s2.embedding) > 0
+	  AND size(s1.embedding) = size(s2.embedding)
 	WITH s1, s2, gds.similarity.cosine(s1.embedding, s2.embedding) AS sim
 	WHERE sim > $threshold
 	MERGE (s1)-[r:CONNECTED_TO]->(s2)

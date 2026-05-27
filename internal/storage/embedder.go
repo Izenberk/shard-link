@@ -38,16 +38,17 @@ func (m *MockEmbedder) Dimension() int {
 // --- 2. GEMINI EMBEDDER (Option: "server") ---
 
 type GeminiEmbedder struct {
-	client *genai.Client
-	model  string
+	client    *genai.Client
+	model     string
+	targetDim int
 }
 
-func NewGeminiEmbedder(ctx context.Context, apiKey, model string) (*GeminiEmbedder, error) {
+func NewGeminiEmbedder(ctx context.Context, apiKey, model string, targetDim int) (*GeminiEmbedder, error) {
 	client, err := genai.NewClient(ctx, option.WithAPIKey(apiKey))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Gemini client: %w", err)
 	}
-	return &GeminiEmbedder{client: client, model: model}, nil
+	return &GeminiEmbedder{client: client, model: model, targetDim: targetDim}, nil
 }
 
 func (g *GeminiEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
@@ -56,12 +57,38 @@ func (g *GeminiEmbedder) Embed(ctx context.Context, text string) ([]float32, err
 	if err != nil {
 		return nil, fmt.Errorf("gemini embedding failed: %w", err)
 	}
-	return res.Embedding.Values, nil
+
+	vec := res.Embedding.Values
+
+	// Matryoshka truncation: take first N dimensions, then L2-normalize.
+	// Required when the Go SDK doesn't expose OutputDimensionality.
+	if g.targetDim > 0 && g.targetDim < len(vec) {
+		vec = l2Normalize(vec[:g.targetDim])
+	}
+
+	return vec, nil
 }
 
 func (g *GeminiEmbedder) Dimension() int {
-	// Standard for gemini-embedding-001
-	return 3072 
+	return g.targetDim
+}
+
+// l2Normalize divides each element by the vector's L2 norm.
+// Required after Matryoshka truncation to maintain unit-length vectors for cosine similarity.
+func l2Normalize(vec []float32) []float32 {
+	var sum float64
+	for _, v := range vec {
+		sum += float64(v) * float64(v)
+	}
+	if sum == 0 {
+		return vec
+	}
+	norm := float32(math.Sqrt(sum))
+	out := make([]float32, len(vec))
+	for i, v := range vec {
+		out[i] = v / norm
+	}
+	return out
 }
 
 func (g *GeminiEmbedder) Close() error {
@@ -120,8 +147,6 @@ func (o *OllamaEmbedder) Embed(ctx context.Context, text string) ([]float32, err
 
 func (o *OllamaEmbedder) Dimension() int {
 	// Adjust based on the model (nomic is usually 768, mxbai is 1024)
-	// For consistency with Shard-Link's 3072-D standard, we might need a model that supports it
-	// or update the system to be dimension-agnostic.
 	return 768 
 }
 

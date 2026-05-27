@@ -22,6 +22,15 @@ func main() {
 		log.Println("WARNING: HUB_API_KEY is not set. Server is running without authentication.")
 	}
 
+	// 1.5 Configure Embedding Dimension (before any vessel or pool usage)
+	targetDim := 768
+	if dimStr := os.Getenv("EMBEDDING_DIMENSION"); dimStr != "" {
+		if d, err := strconv.Atoi(dimStr); err == nil && d > 0 {
+			targetDim = d
+		}
+	}
+	storage.SetVectorDimension(targetDim)
+
 	// 2. Ignite the Vessel with Retry Logic
 	var v storage.Repository
 	var err error
@@ -127,12 +136,12 @@ func main() {
 			model = "gemini-embedding-001"
 		}
 		
-		geminiEmb, err := storage.NewGeminiEmbedder(ctx, geminiKey, model)
+		geminiEmb, err := storage.NewGeminiEmbedder(ctx, geminiKey, model, targetDim)
 		if err != nil {
 			log.Fatalf("Failed to ignite Cloud Embedder: %v", err)
 		}
 		emb = geminiEmb
-		log.Printf("SHARD-LINK: Cloud Intelligence Active (%s)", model)
+		log.Printf("SHARD-LINK: Cloud Intelligence Active (%s @ %d-D)", model, targetDim)
 		
 	case "local":
 		// Local Mode: Privacy-first, runs a model via Ollama
@@ -143,7 +152,7 @@ func main() {
 
 	default:
 		// None Mode: Hardware/Budget constraint fallback
-		emb = storage.NewMockEmbedder(3072)
+		emb = storage.NewMockEmbedder(targetDim)
 		log.Println("SHARD-LINK: Intelligence is in 'Manual/Mock' mode (No embedding)")
 	}
 

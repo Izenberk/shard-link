@@ -18,7 +18,7 @@ Shard-Link is a high-performance context engine providing "long-term memory" for
 ## Vector Precision Rules
 - **Internal format:** `[]float32`
 - **Serialization:** Use `strconv.FormatFloat(f, 'g', -1, 32)` — NEVER `fmt.Sprintf("%f")`
-- **Dimensions:** 3072-D (Gemini/Production compatible)
+- **Dimensions:** 768-D default (Matryoshka-truncated from Gemini 3072-D, configurable via `EMBEDDING_DIMENSION`)
 
 ## Domain Language
 - **Shards:** Atomic contextual fragments with vector embeddings
