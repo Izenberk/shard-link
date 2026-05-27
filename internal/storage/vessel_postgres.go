@@ -436,7 +436,7 @@ func formatVector(v []byte) *string {
 	if len(v) == 0 {
 		return nil
 	}
-	floats := decodeVector(v)
+	floats := DecodeVector(v)
 	if len(floats) == 0 {
 		return nil
 	}

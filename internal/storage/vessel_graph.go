@@ -99,7 +99,7 @@ func (v *VesselGraph) SaveShard(ctx context.Context, s Shard) error {
 		"id":          s.ID,
 		"category":    s.Category,
 		"content":     s.Content,
-		"embedding":   decodeVector(s.Vector), // Convert []byte to []float32 for Neo4j
+		"embedding":   DecodeVector(s.Vector), // Convert []byte to []float32 for Neo4j
 		"metadata":    string(s.Metadata),
 		"source_type": s.SourceType,
 		"source_ref":  s.SourceRef,
@@ -162,7 +162,7 @@ func (v *VesselGraph) FindResonant(ctx context.Context, queryVector []byte, limi
 
 	params := map[string]any{
 		"limit":  limit,
-		"vector": decodeVector(queryVector),
+		"vector": DecodeVector(queryVector),
 	}
 
 	result, err := neo4j.ExecuteQuery(ctx, v.driver, query, params, neo4j.EagerResultTransformer,
@@ -717,7 +717,7 @@ func (v *VesselGraph) GetCoreShards(ctx context.Context) ([]Shard, error) {
 }
 
 func (v *VesselGraph) SearchGraph(ctx context.Context, queryVector []byte, limit int, shouldTouch bool) ([]Shard, []ShardBond, error) {
-	vec := decodeVector(queryVector)
+	vec := DecodeVector(queryVector)
 	
 	// Multi-Hop: Find the center AND its connected neighbors + relationships
 	var query string

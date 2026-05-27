@@ -22,6 +22,7 @@ type MCPServer struct {
 	mcp      *server.MCPServer
 	apiKey   string
 	embedder storage.Embedder
+	wm       *WorkingMemory
 }
 
 func NewMCPServer(v storage.Repository, apiKey string, e storage.Embedder) *MCPServer {
@@ -36,11 +37,15 @@ func NewMCPServer(v storage.Repository, apiKey string, e storage.Embedder) *MCPS
 		server.WithPromptCapabilities(true),
 	)
 
+	wm := NewWorkingMemory(30 * time.Minute)
+	wm.StartCleanup(context.Background())
+
 	mcpSrv := &MCPServer{
 		vessel:   v,
 		mcp:      s,
 		apiKey:   apiKey,
 		embedder: e,
+		wm:       wm,
 	}
 
 	// 2. Register tools, resources, and prompts BEFORE return
@@ -110,6 +115,7 @@ func (s *MCPServer) RegisterTools() {
 		mcp.WithString("query_vector", mcp.Description("Base64 encoded float32 vector (optional if query_text is provided)")),
 		mcp.WithNumber("limit", mcp.Description("Max results to return")),
 		mcp.WithNumber("lambda", mcp.Description("MMR diversity tuning (0.0=max diversity, 1.0=max relevance). Default: 0.7")),
+		mcp.WithNumber("bias", mcp.Description("Cognitive bias strength (0.0=pure centroid, 1.0=pure query). Default from COGNITIVE_BIAS_LAMBDA env or 0.7")),
 	)
 	s.mcp.AddTool(searchTool, s.handleSearch)
 
@@ -145,6 +151,7 @@ func (s *MCPServer) RegisterTools() {
 		mcp.WithDescription("Comprehensive search across all memory engines (Vector, Text, and Graph Mesh). Deduplicates results and provides relational context."),
 		mcp.WithString("query", mcp.Description("The keyword or natural language topic to search for"), mcp.Required()),
 		mcp.WithNumber("limit", mcp.Description("Max results per engine"), mcp.DefaultNumber(5)),
+		mcp.WithNumber("bias", mcp.Description("Cognitive bias strength (0.0=pure centroid, 1.0=pure query). Default from COGNITIVE_BIAS_LAMBDA env or 0.7")),
 	)
 	s.mcp.AddTool(searchAllTool, s.handleSearchAll)
 }
@@ -164,6 +171,8 @@ func (s *MCPServer) handleSearchAll(ctx context.Context, request mcp.CallToolReq
 	if s.embedder != nil {
 		floats, err := s.embedder.Embed(ctx, query)
 		if err == nil {
+			// Working Memory: bias toward session centroid
+			floats = s.biasVector(ctx, floats, request.GetFloat("bias", -1))
 			queryVec = storage.EncodeVector(floats)
 		}
 	}
@@ -226,6 +235,9 @@ func (s *MCPServer) handleSearchAll(ctx context.Context, request mcp.CallToolReq
 	}
 	_ = s.vessel.ReinforceShards(ctx, shardIDs)
 
+	// Working Memory: update session centroid with retrieved shards
+	s.updateCentroid(ctx, seenShards)
+
 	// C. Format Response
 	var response string
 	response = fmt.Sprintf("Found %d unique shards and %d relational bonds:\n---\n", len(seenShards), len(allBonds))
@@ -263,6 +275,8 @@ func (s *MCPServer) handleSearchGraph(ctx context.Context, request mcp.CallToolR
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Embedding failed: %v", err)), nil
 		}
+		// Working Memory: bias toward session centroid
+		floats = s.biasVector(ctx, floats, -1)
 		queryVec = storage.EncodeVector(floats)
 	} else {
 		return mcp.NewToolResultError("Either query_vector or query_text must be provided"), nil
@@ -273,6 +287,9 @@ func (s *MCPServer) handleSearchGraph(ctx context.Context, request mcp.CallToolR
 		log.Printf("[MCP ERROR] search_graph failed: %v", err)
 		return nil, err
 	}
+
+	// Working Memory: update session centroid with retrieved shards
+	s.updateCentroidSlice(ctx, shards)
 
 	var response string
 	if len(shards) == 0 {
@@ -336,6 +353,8 @@ func (s *MCPServer) handleSearch(ctx context.Context, request mcp.CallToolReques
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Embedding failed: %v", err)), nil
 		}
+		// Working Memory: bias toward session centroid
+		floats = s.biasVector(ctx, floats, request.GetFloat("bias", -1))
 		queryVec = storage.EncodeVector(floats)
 	} else {
 		return mcp.NewToolResultError("Either query_vector or query_text must be provided"), nil
@@ -356,6 +375,9 @@ func (s *MCPServer) handleSearch(ctx context.Context, request mcp.CallToolReques
 	}
 	results = storage.MaximalMarginalRelevance(queryVec, results, limit, lambda)
 
+	// Working Memory: update session centroid with retrieved shards
+	s.updateCentroidSlice(ctx, results)
+
 	var response string
 	for _, shard := range results {
 		response += fmt.Sprintf("[%s]: %s\n---\n", shard.ID, shard.Content)
@@ -374,6 +396,9 @@ func (s *MCPServer) handleSearchText(ctx context.Context, request mcp.CallToolRe
 		log.Printf("[MCP ERROR] search_text failed: %v", err)
 		return nil, err
 	}
+
+	// Working Memory: update session centroid with text results (if they carry vectors)
+	s.updateCentroidSlice(ctx, results)
 
 	var response string
 	if len(results) == 0 {
@@ -436,6 +461,45 @@ func (s *MCPServer) StartHub(port int, baseURL string) error {
 
 	log.Printf("[MCP] Hub ignited on :%d — Primary: Streamable HTTP (/mcp) | Legacy: SSE (/sse)\n", port)
 	return http.ListenAndServe(fmt.Sprintf(":%d", port), mux)
+}
+
+// --- Working Memory Helpers ---
+
+// sessionID extracts the MCP session ID from context, falling back to "unknown".
+func sessionID(ctx context.Context) string {
+	if sess := server.ClientSessionFromContext(ctx); sess != nil {
+		return sess.SessionID()
+	}
+	return "unknown"
+}
+
+// biasVector applies cognitive biasing to a query vector using the session centroid.
+// biasParam < 0 means "use default from env or 0.7".
+func (s *MCPServer) biasVector(ctx context.Context, floats []float32, biasParam float64) []float32 {
+	lambda := biasParam
+	if lambda < 0 {
+		lambda = 0.7
+		if envB := os.Getenv("COGNITIVE_BIAS_LAMBDA"); envB != "" {
+			if parsed, err := strconv.ParseFloat(envB, 64); err == nil {
+				lambda = parsed
+			}
+		}
+	}
+	return s.wm.Bias(sessionID(ctx), floats, lambda)
+}
+
+// updateCentroid updates the working memory centroid from a deduplicated shard map.
+func (s *MCPServer) updateCentroid(ctx context.Context, shardMap map[string]storage.Shard) {
+	shards := make([]storage.Shard, 0, len(shardMap))
+	for _, sh := range shardMap {
+		shards = append(shards, sh)
+	}
+	s.wm.Update(sessionID(ctx), shards)
+}
+
+// updateCentroidSlice updates the working memory centroid from a shard slice.
+func (s *MCPServer) updateCentroidSlice(ctx context.Context, shards []storage.Shard) {
+	s.wm.Update(sessionID(ctx), shards)
 }
 
 func (s *MCPServer) handleSave(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {

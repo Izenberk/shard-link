@@ -14,7 +14,7 @@ func MaximalMarginalRelevance(queryVector []byte, candidates []Shard, limit int,
 	}
 
 	// 1. Decode the query vector once
-	qVec := decodeVector(queryVector)
+	qVec := DecodeVector(queryVector)
 	if qVec == nil {
 		return candidates // Fallback if query vector is invalid
 	}
@@ -29,7 +29,7 @@ func MaximalMarginalRelevance(queryVector []byte, candidates []Shard, limit int,
 
 	var data []candidateData
 	for _, c := range candidates {
-		v := decodeVector(c.Vector)
+		v := DecodeVector(c.Vector)
 		if v == nil {
 			continue
 		}
@@ -56,7 +56,7 @@ func MaximalMarginalRelevance(queryVector []byte, candidates []Shard, limit int,
 			// Calculate penalty (max similarity to already selected items)
 			maxSimToSelected := 0.0
 			for _, s := range selected {
-				sVec := decodeVector(s.Vector)
+				sVec := DecodeVector(s.Vector)
 				if sVec != nil {
 					sim := cosineSimilarity(data[j].vector, sVec)
 					if sim > maxSimToSelected {

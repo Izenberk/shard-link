@@ -50,8 +50,8 @@ func NewVessel(path string) (*Vessel, error) {
 
 	// 2. Register vec_distance_cosine (The heart of Shard-Link)
 	err = conn.CreateFunction("vec_distance_cosine", 2, sqlite3.DETERMINISTIC, func(ctx sqlite3.Context, arg ...sqlite3.Value) {
-		v1 := decodeVector(arg[0].RawBlob())
-		v2 := decodeVector(arg[1].RawBlob())
+		v1 := DecodeVector(arg[0].RawBlob())
+		v2 := DecodeVector(arg[1].RawBlob())
 
 		defer func() {
 			if v1 != nil && cap(v1) == 3072 {
@@ -633,7 +633,9 @@ func (v *Vessel) Close() error {
 
 // --- Resonance Math Helpers ---
 
-func decodeVector(b []byte) []float32 {
+// DecodeVector converts a little-endian []byte blob into []float32.
+// Used by SQLite cosine distance and by WorkingMemory centroid calculations.
+func DecodeVector(b []byte) []float32 {
 	if len(b) == 0 || len(b)%4 != 0 {
 		return nil
 	}
