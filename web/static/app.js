@@ -1,8 +1,15 @@
 let data = { nodes: [], links: [] };
+let fullData = null; // F.6: Unfiltered snapshot for community isolation reset
 let simulation, svg, container, hudLayer, labelLayer, node, link;
 let bondMode = false;
 let selectedNode = null;
 let focusMode = false;
+let focusedNodeID = null;
+let communityFilterState = null; // F.6: null | { id, phase: 'highlight'|'isolate' }
+let searchActive = false; // True when viewing search results — blocks auto-refresh
+let searchDebounceTimer = null; // F.7
+const LOG_MAX_ENTRIES = 200; // L.7
+const activeLogFilters = new Set(['success', 'bond', 'evict', 'info', 'warn', 'system', 'search', 'error']); // L.6
 let width = window.innerWidth;
 let height = window.innerHeight;
 const color = d3.scaleOrdinal(["#5ef3ff", "#00d4ff", "#70a1ff", "#a371f7", "#58a6ff"]);
@@ -10,6 +17,8 @@ const degree = {};
 
 const zoom = d3.zoom().scaleExtent([0.1, 4]).on("zoom", (event) => {
     container.attr("transform", event.transform);
+    const pct = Math.round(event.transform.k * 100);
+    document.getElementById('zoom-level').textContent = pct + '%';
 });
 
 function initViz() {
@@ -31,14 +40,14 @@ function initViz() {
 
     simulation = d3.forceSimulation()
         .force("link", d3.forceLink().id(d => d.id).distance(180).strength(0.3))
-        .force("charge", d3.forceManyBody().strength(d => d.category === 'archived' ? 0 : -1600)) 
+        .force("charge", d3.forceManyBody().strength(d => d.category === 'archived' ? 0 : -1600))
         .force("center", d3.forceCenter(width / 2, height / 2))
         .force("collision", d3.forceCollide().radius(d => {
             if (d.category === 'archived') return 10;
             return (degree[d.id] || 0) * 2 + 45;
         }))
         .force("cluster", forceCluster)
-        .force("archival", forceArchival) // Orbit outer system
+        .force("archival", forceArchival)
         .force("x", d3.forceX(width / 2).strength(d => {
             if (d.category === 'core') return 0.6;
             if (d.category === 'archived') return 0;
@@ -51,10 +60,11 @@ function initViz() {
         }));
 
     simulation.on("tick", () => {
+        if (!link || !node) return;
         link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
             .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
         node.attr("cx", d => d.x).attr("cy", d => d.y);
-        
+
         const activeIdNode = document.getElementById('det-id');
         if (activeIdNode && activeIdNode.innerText) {
             const d = data.nodes.find(n => n.id === activeIdNode.innerText);
@@ -85,8 +95,7 @@ function forceCluster(alpha) {
 }
 
 function forceArchival(alpha) {
-    // Dynamic Orbital Radius: Find the farthest ACTIVE shard and add padding
-    let maxActiveDist = 400; // Minimum baseline
+    let maxActiveDist = 400;
     data.nodes.forEach(n => {
         if (n.category !== 'archived') {
             const dx = n.x - width / 2;
@@ -96,28 +105,57 @@ function forceArchival(alpha) {
         }
     });
 
-    const orbitalRadius = maxActiveDist + 300; // Padding to ensure clear separation
-    
+    const orbitalRadius = maxActiveDist + 300;
+
     data.nodes.forEach(n => {
         if (n.category === 'archived') {
             const dx = n.x - width / 2;
             const dy = n.y - height / 2;
             const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-            const strength = 0.8; // High precision pull
-            
+            const strength = 0.8;
+
             n.vx += (dx / dist) * (orbitalRadius - dist) * alpha * strength;
             n.vy += (dy / dist) * (orbitalRadius - dist) * alpha * strength;
         }
     });
 }
 
+// F.2: Calculate node radius based on PageRank centrality
+function nodeRadius(d) {
+    if (d.category === 'core') return 12;
+    if (d.category === 'archived') return 4;
+    const baseRadius = 5;
+    const scaleFactor = 15;
+    return Math.min(baseRadius + (d.pagerank || 0) * scaleFactor, 20);
+}
+
+// F.2: Encode survival as glow intensity instead of dimming fill color.
+// All nodes stay full color (visible), but high-survival nodes radiate
+// a bright halo while low-survival nodes sit flat with no glow.
+function survivalGlow(d) {
+    if (d.category === 'core') return `drop-shadow(0 0 10px var(--core-color))`;
+    if (d.category === 'archived') return `drop-shadow(0 0 6px rgba(255,255,255,0.5))`;
+    const s = d.survival || 0;
+    const baseColor = color(d.community);
+    // Map survival 0-100 to glow radius 0-12px
+    const radius = Math.round((s / 100) * 12);
+    if (radius <= 1) return 'none';
+    return `drop-shadow(0 0 ${radius}px ${baseColor})`;
+}
+
+function nodeFill(d) {
+    if (d.category === 'core') return "var(--core-color)";
+    if (d.category === 'archived') return "#fff";
+    return color(d.community);
+}
+
 async function loadGraph() {
+    searchActive = false;
     try {
         const response = await fetch('/api/graph');
         const newData = await response.json();
-        
+
         // --- Position Preservation Layer ---
-        // Map existing positions to incoming data to prevent simulation 'reset'
         const nodeMap = new Map(data.nodes.map(n => [n.id, n]));
         newData.nodes.forEach(newNode => {
             const oldNode = nodeMap.get(newNode.id);
@@ -130,23 +168,22 @@ async function loadGraph() {
                 newNode.fy = oldNode.fy;
             }
         });
-        
-        // 1. Check for Structural Changes (Requires full updateViz)
+
         const structureChanged = newData.nodes.length !== data.nodes.length || newData.links.length !== data.links.length;
         const categoriesChanged = JSON.stringify(newData.nodes.map(n => n.category)) !== JSON.stringify(data.nodes.map(n => n.category));
-        
-        // 2. Check for Metric Changes (Sidebar & Visual properties only)
         const metricsChanged = JSON.stringify(newData.nodes.map(n => n.survival?.toFixed(1))) !== JSON.stringify(data.nodes.map(n => n.survival?.toFixed(1)));
+
+        // F.6: Update fullData snapshot whenever we get fresh data
+        fullData = { nodes: [...newData.nodes], links: [...newData.links], threshold: newData.threshold };
 
         if (structureChanged || categoriesChanged) {
             data = newData;
-            updateViz(true); // Structural change: Allow pulse to settle new nodes
+            updateViz(true);
         } else if (metricsChanged) {
             data = newData;
-            updateViz(false); // Metric change: Visual update only, keep mesh stationary
+            updateViz(false);
         }
 
-        // 3. Independent Sidebar Sync
         const currentID = document.getElementById('det-id').innerText;
         if (currentID && currentID !== "UNKNOWN") {
             const updatedNode = data.nodes.find(n => n.id === currentID);
@@ -160,8 +197,7 @@ async function loadGraph() {
 
 function updateViz(restartSimulation = true) {
     buildAdjacencyMap();
-    
-    // Reset and recalculate degrees
+
     for (let key in degree) delete degree[key];
     data.links.forEach(l => {
         const sID = l.source.id || l.source;
@@ -177,25 +213,60 @@ function updateViz(restartSimulation = true) {
         .style("stroke-width", d => Math.pow(d.weight, 2) * 2 + 1 + "px")
         .style("stroke-opacity", d => Math.max(0.1, d.weight * 0.35));
 
+    // F.9: Tooltip handlers on links
+    link.on("mouseenter", (event, d) => {
+            const tooltip = document.getElementById('node-tooltip');
+            const sID = d.source.id || d.source;
+            const tID = d.target.id || d.target;
+            tooltip.querySelector('.tooltip-id').textContent = `${truncateID(sID)} <-> ${truncateID(tID)}`;
+            tooltip.querySelector('.tooltip-category').textContent = '';
+            tooltip.querySelector('.tooltip-content').textContent = `SIM: ${d.weight.toFixed(2)}`;
+            tooltip.style.display = 'block';
+        })
+        .on("mouseleave", () => { document.getElementById('node-tooltip').style.display = 'none'; })
+        .on("mousemove", (event) => {
+            const tooltip = document.getElementById('node-tooltip');
+            tooltip.style.left = (event.clientX + 14) + 'px';
+            tooltip.style.top = (event.clientY - 10) + 'px';
+        });
+
     node = container.select("g.nodes-layer").selectAll("circle")
         .data(data.nodes, d => d.id)
         .join(
             enter => enter.append("circle")
-                .attr("class", d => "node " + d.category + (d.category === 'core' ? " core" : ""))
-                .attr("r", d => d.category === 'core' ? 12 : (d.category === 'archived' ? 4 : (degree[d.id] || 0) * 1.5 + 6))
-                .attr("fill", d => d.category === 'core' ? "var(--core-color)" : (d.category === 'archived' ? "#fff" : color(d.community)))
+                .attr("class", "node")
+                .attr("r", nodeRadius)
+                .attr("fill", nodeFill)
+                .style("filter", survivalGlow) // F.2: Glow intensity = survival
                 .on("click", (event, d) => {
                     event.stopPropagation();
                     selectNode(d);
                 })
                 .call(d3.drag().on("start", dragstarted).on("drag", dragged).on("end", dragended)),
             update => update
-                .attr("class", d => "node " + d.category + (d.category === 'core' ? " core" : ""))
-                .attr("r", d => d.category === 'core' ? 12 : (d.category === 'archived' ? 4 : (degree[d.id] || 0) * 1.5 + 6))
-                .attr("fill", d => d.category === 'core' ? "var(--core-color)" : (d.category === 'archived' ? "#fff" : color(d.community)))
+                .attr("class", "node")
+                .attr("r", nodeRadius)
+                .attr("fill", nodeFill)
+                .style("filter", survivalGlow)
         );
 
-    // ALWAYS sync simulation with current data to prevent divergence
+    // F.8: Tooltip handlers on nodes
+    node.on("mouseenter", (event, d) => {
+            const tooltip = document.getElementById('node-tooltip');
+            tooltip.querySelector('.tooltip-id').textContent = truncateID(d.id);
+            const catEl = tooltip.querySelector('.tooltip-category');
+            catEl.textContent = (d.category || 'unknown').toUpperCase();
+            catEl.className = 'tooltip-category ' + (d.category || '');
+            tooltip.querySelector('.tooltip-content').textContent = (d.content || '').substring(0, 120) + (d.content && d.content.length > 120 ? '...' : '');
+            tooltip.style.display = 'block';
+        })
+        .on("mouseleave", () => { document.getElementById('node-tooltip').style.display = 'none'; })
+        .on("mousemove", (event) => {
+            const tooltip = document.getElementById('node-tooltip');
+            tooltip.style.left = (event.clientX + 14) + 'px';
+            tooltip.style.top = (event.clientY - 10) + 'px';
+        });
+
     simulation.nodes(data.nodes);
     simulation.force("link").links(data.links);
 
@@ -215,7 +286,6 @@ function updateViz(restartSimulation = true) {
 
         simulation.alpha(0.5).restart();
     } else {
-        // Just update positions based on the current alpha without a full restart pulse
         simulation.alpha(0.01).restart();
     }
 
@@ -232,6 +302,12 @@ function updateViz(restartSimulation = true) {
     updateNeighborhoods();
 }
 
+// F.8/F.9: Truncate long shard IDs for tooltip display
+function truncateID(id) {
+    if (!id) return '';
+    return id.length > 24 ? id.substring(0, 21) + '...' : id;
+}
+
 function selectNode(d) {
     if (bondMode) {
         if (!selectedNode) {
@@ -240,16 +316,19 @@ function selectNode(d) {
             node.style("stroke-width", n => n.id === d.id ? "4px" : "0");
         } else if (selectedNode.id !== d.id) {
             createBond(selectedNode.id, d.id);
-            toggleBondMode(); 
+            toggleBondMode();
         }
         return;
     }
 
     focusNode(d.id);
-    
+
     const sidebar = document.getElementById('details');
     sidebar.classList.add('active');
     document.getElementById('det-id').innerText = d.id || "UNKNOWN";
+    document.getElementById('det-category').innerText = (d.category || "--").toUpperCase(); // F.3
+    document.getElementById('det-source-type').innerText = d.source_type || "--"; // F.3
+    document.getElementById('det-source-ref').innerText = d.source_ref || "--"; // F.3
     document.getElementById('det-density').innerText = (degree[d.id] || 0) + " BONDS";
     document.getElementById('det-rank').innerText = (d.pagerank || 0).toFixed(4);
     document.getElementById('det-survival').innerText = (d.survival || 0).toFixed(2);
@@ -257,7 +336,6 @@ function selectNode(d) {
     document.getElementById('det-comm').innerText = d.community !== undefined ? "N_" + d.community : "N_NONE";
     document.getElementById('det-content').innerText = d.content || "NO_CONTENT";
 
-    // Core and Archived shards cannot be manually evicted
     const evictBtn = document.getElementById('evict-container');
     if (evictBtn) {
         if (d.category === 'core' || d.category === 'archived') {
@@ -308,9 +386,11 @@ function focusNode(id) {
     }
     focusedNodeID = id;
     focusMode = true;
-    
-    // Apply visibility based on the ID and Adjacency Map
-    node.style("opacity", n => n.id === id || isNeighbor(id, n.id) ? 1 : 0.05);
+
+    node.style("opacity", n => {
+        if (n.id === id || isNeighbor(id, n.id)) return 1;
+        return 0.05;
+    });
     link.style("stroke-opacity", l => {
         const sID = l.source.id || l.source;
         const tID = l.target.id || l.target;
@@ -323,32 +403,55 @@ function focusNode(id) {
 function resetFocus() {
     focusedNodeID = null;
     focusMode = false;
-    node.style("opacity", 1);
-    node.style("stroke", "none");
-    link.style("stroke-opacity", 0.1);
-    labelLayer.selectAll("*").remove();
+    if (node) node.style("opacity", 1).attr("fill", nodeFill).style("filter", survivalGlow);
+    if (node) node.style("stroke", "none");
+    if (link) link.style("stroke-opacity", 0.1);
+    if (labelLayer) labelLayer.selectAll("*").remove();
 }
 
 function isNeighbor(idA, idB) {
     return adjMap.get(idA)?.has(idB) || false;
 }
+
 function updateNeighborhoods() {
     const list = document.getElementById('neighborhoods-list');
     list.innerHTML = "";
-    const communities = [...new Set(data.nodes.map(n => n.community))].sort();
+    // Count members per community
+    const commCounts = {};
+    data.nodes.forEach(n => {
+        if (n.community === undefined) return;
+        commCounts[n.community] = (commCounts[n.community] || 0) + 1;
+    });
+    const communities = Object.keys(commCounts).sort((a, b) => a - b);
     communities.forEach(c => {
-        if (c === undefined) return;
         const btn = document.createElement("div");
         btn.className = "hud-btn";
         btn.style.padding = "4px 8px";
         btn.style.fontSize = "9px";
-        btn.innerText = "N_" + c;
+        btn.innerText = `N_${c} (${commCounts[c]})`;
         btn.onclick = (event) => {
             event.stopPropagation();
-            highlightCommunity(c);
+            toggleCommunityFilter(Number(c)); // F.6: 3-state toggle
         };
         list.appendChild(btn);
     });
+}
+
+// F.6: 3-state community toggle: highlight -> isolate -> reset
+function toggleCommunityFilter(communityID) {
+    if (!communityFilterState || communityFilterState.id !== communityID) {
+        // First click (or different community): highlight
+        communityFilterState = { id: communityID, phase: 'highlight' };
+        highlightCommunity(communityID);
+        fetchCommunitySummary(communityID); // F.1
+    } else if (communityFilterState.phase === 'highlight') {
+        // Second click: isolate
+        communityFilterState.phase = 'isolate';
+        isolateCommunity(communityID);
+    } else {
+        // Third click: reset
+        resetCommunityFilter();
+    }
 }
 
 function highlightCommunity(communityID) {
@@ -357,19 +460,81 @@ function highlightCommunity(communityID) {
     link.style("stroke-opacity", l => (l.source.community === communityID && l.target.community === communityID) ? 0.8 : 0.01);
 }
 
+// F.6: Filter data to only community members, re-render
+function isolateCommunity(communityID) {
+    if (!fullData) return;
+    const communityNodes = fullData.nodes.filter(n => n.community === communityID);
+    const nodeIDs = new Set(communityNodes.map(n => n.id));
+    const communityLinks = fullData.links.filter(l => {
+        const sID = l.source.id || l.source;
+        const tID = l.target.id || l.target;
+        return nodeIDs.has(sID) && nodeIDs.has(tID);
+    });
+
+    data = { nodes: communityNodes, links: communityLinks, threshold: fullData.threshold };
+    updateViz(true);
+}
+
+// F.6: Restore full data
+function resetCommunityFilter() {
+    communityFilterState = null;
+    hideCommunityPanel();
+    if (fullData) {
+        data = { nodes: [...fullData.nodes], links: [...fullData.links], threshold: fullData.threshold };
+        updateViz(true);
+    }
+    resetFocus();
+}
+
+// F.1: Fetch and display community summary
+async function fetchCommunitySummary(communityID) {
+    const panel = document.getElementById('community-summary');
+    const textEl = document.getElementById('comm-summary-text');
+    try {
+        const resp = await fetch(`/api/community?id=${communityID}`);
+        if (resp.ok) {
+            const result = await resp.json();
+            if (result.summary) {
+                textEl.textContent = result.summary;
+                panel.style.display = 'block';
+            } else {
+                textEl.textContent = 'No summary available for this community.';
+                panel.style.display = 'block';
+            }
+        }
+    } catch (err) {
+        console.error("Community summary fetch failed:", err);
+    }
+}
+
+function hideCommunityPanel() {
+    document.getElementById('community-summary').style.display = 'none';
+}
+
+// F.5: Enhanced bond mode toggle with visual indicator
 function toggleBondMode() {
     bondMode = !bondMode;
     selectedNode = null;
     const btn = document.getElementById('bond-mode-btn');
+    const badge = document.getElementById('bond-mode-badge');
     btn.innerText = bondMode ? "BOND_MODE: ON" : "BOND_MODE: OFF";
     btn.style.borderColor = bondMode ? "var(--core-color)" : "var(--panel-border)";
     node.style("stroke", "none");
+
+    // F.5: Orange border on SVG + badge
+    if (bondMode) {
+        svg.classed('bond-mode-active', true);
+        badge.style.display = 'block';
+    } else {
+        svg.classed('bond-mode-active', false);
+        badge.style.display = 'none';
+    }
 }
 
 async function createBond(fromID, toID) {
     const fromShard = data.nodes.find(n => n.id === fromID);
     const targetShard = data.nodes.find(n => n.id === toID);
-    
+
     if (fromShard?.category === 'archived' || targetShard?.category === 'archived') {
         alert("ACTION_DENIED: Cannot forge bonds with archived memory (White Dwarfs).");
         return;
@@ -395,8 +560,8 @@ async function deleteBond(fromID, toID) {
 
 function drawHUD(d) {
     hudLayer.selectAll("*").remove();
-    if (!d || isNaN(d.x) || isNaN(d.y)) return; // Prevent NaN errors
-    const r = d.category === 'core' ? 12 : (degree[d.id] || 0) * 1.5 + 6;
+    if (!d || isNaN(d.x) || isNaN(d.y)) return;
+    const r = nodeRadius(d);
     const boxSize = r * 3.5;
     hudLayer.append("rect")
         .attr("class", "selection-box")
@@ -413,9 +578,9 @@ function closeSidebar() {
     resetFocus();
 }
 
-function resetView() { 
+function resetView() {
     resetFocus();
-    svg.transition().duration(750).call(zoom.transform, d3.zoomIdentity); 
+    svg.transition().duration(750).call(zoom.transform, d3.zoomIdentity);
 }
 function zoomIn() { svg.transition().duration(300).call(zoom.scaleBy, 1.3); }
 function zoomOut() { svg.transition().duration(300).call(zoom.scaleBy, 0.7); }
@@ -427,12 +592,33 @@ function toggleGlossary() {
     btn.innerText = glossary.classList.contains('active') ? 'HIDE_GLOSSARY' : 'SHOW_GLOSSARY';
 }
 
+// F.7: Debounced search (300ms) with loading state
+function debouncedSearch() {
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    const searchBtn = document.getElementById('search-btn');
+    searchBtn.classList.add('loading');
+    searchDebounceTimer = setTimeout(() => {
+        semanticSearch().finally(() => {
+            searchBtn.classList.remove('loading');
+        });
+    }, 300);
+}
+
 async function semanticSearch() {
     const term = document.getElementById('search').value;
     if (!term) return;
     try {
         const response = await fetch(`/api/search?q=${encodeURIComponent(term)}`);
+        if (!response.ok) {
+            const errText = await response.text();
+            console.error(`Search failed (${response.status}): ${errText}`);
+            addLogEntry({ timestamp: new Date().toLocaleTimeString('en-GB'), type: 'error', message: `Search failed: ${errText}` });
+            return;
+        }
         data = await response.json();
+        fullData = { nodes: [...data.nodes], links: [...data.links], threshold: data.threshold };
+        communityFilterState = null;
+        searchActive = true;
         updateViz();
         resetFocus();
     } catch (err) { console.error(err); }
@@ -444,20 +630,39 @@ function dragended(event) { if (!event.active) simulation.alphaTarget(0); event.
 
 // --- Activity Feed & Logging ---
 
+// F.4: SSE with exponential backoff reconnect
 function initActivityFeed() {
     const statusDot = document.getElementById('status-dot');
-    const evtSource = new EventSource('/api/activity');
+    let retryDelay = 1000;
+    const maxRetryDelay = 30000;
 
-    evtSource.onmessage = (event) => {
-        const entry = JSON.parse(event.data);
-        addLogEntry(entry);
-    };
+    function connect() {
+        const evtSource = new EventSource('/api/activity');
 
-    evtSource.onerror = () => statusDot.classList.add('offline');
-    evtSource.onopen = () => statusDot.classList.remove('offline');
-    
-    // Hydrate history
+        evtSource.onmessage = (event) => {
+            const entry = JSON.parse(event.data);
+            addLogEntry(entry);
+        };
+
+        evtSource.onopen = () => {
+            statusDot.classList.remove('offline');
+            retryDelay = 1000; // Reset backoff on successful connection
+        };
+
+        evtSource.onerror = () => {
+            statusDot.classList.add('offline');
+            evtSource.close();
+            addLogEntry({ timestamp: new Date().toLocaleTimeString('en-GB'), type: 'system', message: `SSE disconnected. Reconnecting in ${retryDelay / 1000}s...` });
+            setTimeout(() => {
+                connect();
+                retryDelay = Math.min(retryDelay * 2, maxRetryDelay);
+            }, retryDelay);
+        };
+    }
+
+    connect();
     loadPersistentLogs();
+    initLogFilters(); // L.6
 }
 
 async function loadPersistentLogs() {
@@ -465,25 +670,42 @@ async function loadPersistentLogs() {
         const resp = await fetch('/api/logs');
         if (resp.ok) {
             const history = await resp.json();
-            // history is DESC (newest first). Add oldest first to preserve order.
             history.reverse().forEach(entry => addLogEntry(entry));
         }
     } catch (err) { console.error("Log hydration failed:", err); }
 }
 
+// Normalize timestamps to HH:MM:SS regardless of source format
+function normalizeTimestamp(ts) {
+    if (!ts) return new Date().toLocaleTimeString('en-GB');
+    // Already HH:MM:SS
+    if (/^\d{2}:\d{2}:\d{2}$/.test(ts)) return ts;
+    // YYYY-MM-DD HH:MM:SS — extract time portion
+    const match = ts.match(/(\d{2}:\d{2}:\d{2})/);
+    if (match) return match[1];
+    return ts;
+}
+
 function addLogEntry(entry) {
     const container = document.getElementById('log-container');
     if (!container) return;
+    const ts = normalizeTimestamp(entry.timestamp);
     const div = document.createElement('div');
     div.className = 'log-entry';
-    div.innerHTML = `<span class="log-time">[${entry.timestamp}]</span> <span class="log-type-${entry.type}">${entry.message}</span>`;
-    
+    div.dataset.logtype = entry.type || 'info';
+    div.innerHTML = `<span class="log-time">[${ts}]</span> <span class="log-type-${entry.type}">${entry.message}</span>`;
+
     if (entry.shard_id) {
         div.onclick = () => focusOnShard(entry.shard_id);
     }
 
+    // L.6: Respect active filters
+    if (!activeLogFilters.has(entry.type || 'info')) {
+        div.style.display = 'none';
+    }
+
     container.prepend(div);
-    if (container.children.length > 50) container.removeChild(container.lastChild);
+    while (container.children.length > LOG_MAX_ENTRIES) container.removeChild(container.lastChild); // L.7
 }
 
 function focusOnShard(id) {
@@ -500,15 +722,55 @@ function focusOnShard(id) {
 
 function clearLogs() { document.getElementById('log-container').innerHTML = ''; }
 
+// L.6: Log filter toggle system
+function initLogFilters() {
+    const bar = document.getElementById('log-filter-bar');
+    const types = ['success', 'bond', 'evict', 'info', 'warn', 'system', 'search', 'error'];
+    types.forEach(type => {
+        const btn = document.createElement('div');
+        btn.className = 'log-filter-btn active';
+        btn.dataset.type = type;
+        btn.textContent = type.toUpperCase();
+        btn.onclick = () => toggleLogFilter(type, btn);
+        bar.appendChild(btn);
+    });
+}
+
+function toggleLogFilter(type, btn) {
+    if (activeLogFilters.has(type)) {
+        activeLogFilters.delete(type);
+        btn.classList.remove('active');
+        btn.classList.add('inactive');
+    } else {
+        activeLogFilters.add(type);
+        btn.classList.remove('inactive');
+        btn.classList.add('active');
+    }
+
+    // Re-apply visibility on all existing entries
+    const entries = document.querySelectorAll('#log-container .log-entry');
+    entries.forEach(entry => {
+        const entryType = entry.dataset.logtype;
+        entry.style.display = activeLogFilters.has(entryType) ? '' : 'none';
+    });
+}
+
+// F.6: Escape key resets community filter
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && communityFilterState) {
+        resetCommunityFilter();
+    }
+});
+
 // Ignite
 initViz();
 loadGraph();
 initActivityFeed();
 
-window.addEventListener('resize', () => { 
+window.addEventListener('resize', () => {
     width = window.innerWidth;
     height = window.innerHeight;
-    svg.attr("width", width).attr("height", height); 
+    svg.attr("width", width).attr("height", height);
     simulation.force("center", d3.forceCenter(width / 2, height / 2));
     simulation.force("x", d3.forceX(width / 2).strength(d => d.category === 'core' ? 0.6 : 0.03));
     simulation.force("y", d3.forceY(height / 2).strength(d => d.category === 'core' ? 0.6 : 0.03));
@@ -518,19 +780,19 @@ window.addEventListener('resize', () => {
 window.refreshCurrentMetrics = async function() {
     const id = document.getElementById('det-id').innerText;
     if (!id || id === "UNKNOWN") return;
-    
+
     try {
         const response = await fetch('/api/graph');
         const newData = await response.json();
-        data = newData; // Fully update local state
+        data = newData;
+        fullData = { nodes: [...newData.nodes], links: [...newData.links], threshold: newData.threshold };
         updateViz();
-        
+
         const updatedNode = data.nodes.find(n => n.id === id);
         if (updatedNode) {
             document.getElementById('det-survival').innerText = (updatedNode.survival || 0).toFixed(2);
             document.getElementById('det-rank').innerText = (updatedNode.pagerank || 0).toFixed(4);
-            
-            // Temporary flash effect to confirm refresh
+
             const scoreEl = document.getElementById('det-survival');
             scoreEl.style.color = "var(--core-color)";
             setTimeout(() => scoreEl.style.color = "", 500);
@@ -539,5 +801,6 @@ window.refreshCurrentMetrics = async function() {
 }
 
 setInterval(() => {
+    if (searchActive) return; // Don't overwrite search results — user clicks RESET to exit
     if (!document.getElementById('details').classList.contains('active') && !bondMode && !focusMode) loadGraph();
 }, 15000);

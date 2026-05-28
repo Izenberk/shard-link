@@ -94,7 +94,7 @@ func main() {
 	}
 
 	// 3. Summon the Servants (Janitor & Synthesizer)
-	jan := janitor.NewJanitor(v, 15*time.Minute, 1000)
+	jan := janitor.NewJanitor(v, 15*time.Minute, 1000, storage.GlobalLogger)
 
 	// Synthesizer wiring is deferred until after embedder init (step 5)
 
@@ -116,7 +116,7 @@ func main() {
 			hygieneInterval = time.Duration(hours) * time.Hour
 		}
 	}
-	hygieneWorker := hygiene.NewHygieneWorker(graphV, av, lv, hygieneInterval)
+	hygieneWorker := hygiene.NewHygieneWorker(graphV, av, lv, hygieneInterval, storage.GlobalLogger)
 	go hygieneWorker.Run(ctx)
 
 	// 5. Configure Intelligence
@@ -177,7 +177,13 @@ func main() {
 		sum = storage.NewMockSummarizer()
 	}
 
-	syn := synthesizer.NewSynthesizer(v, 10*time.Minute, emb, sum)
+	synthInterval := 30 * time.Minute
+	if si := os.Getenv("SYNTHESIZER_INTERVAL_MINUTES"); si != "" {
+		if mins, err := strconv.Atoi(si); err == nil && mins > 0 {
+			synthInterval = time.Duration(mins) * time.Minute
+		}
+	}
+	syn := synthesizer.NewSynthesizer(v, synthInterval, emb, sum, storage.GlobalLogger)
 	go syn.Run(ctx)
 
 	// 6. Launch the Authenticated Bridge

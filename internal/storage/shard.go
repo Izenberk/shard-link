@@ -2,8 +2,22 @@ package storage
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 )
+
+// meshDirty tracks whether any shard has been saved since the last Synthesizer cycle.
+// Atomic bool — zero-cost coordination between SaveShard (writer) and Synthesizer (reader).
+var meshDirty atomic.Bool
+
+// MarkMeshDirty signals that the Knowledge Mesh has changed (new/updated shard).
+func MarkMeshDirty() { meshDirty.Store(true) }
+
+// IsMeshDirty returns true if any shard was saved since the last ClearMeshDirty().
+func IsMeshDirty() bool { return meshDirty.Load() }
+
+// ClearMeshDirty resets the dirty flag after the Synthesizer processes the change.
+func ClearMeshDirty() { meshDirty.Store(false) }
 
 // LogFunc is a callback for broadcasting system activity.
 type LogFunc func(msg string, category string, shardID string)

@@ -13,20 +13,29 @@
             <h3 title="The entry point for semantic and relational queries across the Knowledge Mesh.">SYSTEM_LOCATE</h3>
             <div class="search-container">
                 <span class="search-icon">⌕</span>
-                <input type="text" id="search" placeholder="SEMANTIC_QUERY..." onkeypress="if(event.key === 'Enter') semanticSearch()">
+                <input type="text" id="search" placeholder="SEMANTIC_QUERY..." onkeypress="if(event.key === 'Enter') debouncedSearch()">
             </div>
             <div class="btn-group">
-                <div class="hud-btn" onclick="semanticSearch()" title="Execute a vector-similarity search to find resonant shards.">SEARCH</div>
+                <div class="hud-btn" id="search-btn" onclick="debouncedSearch()" title="Execute a vector-similarity search to find resonant shards.">SEARCH</div>
                 <div class="hud-btn" onclick="loadGraph()" title="Reload the full Knowledge Mesh view.">RESET</div>
             </div>
         </div>
         <div class="control-section">
             <h3 title="Visual representation of shard relationships, communities, and centrality.">MESH_TOPOLOGY</h3>
             <div class="legend-item" style="color: var(--core-color)" title="Immutable anchor shards representing your core identity or profile."><div class="legend-color" style="background: var(--core-color); box-shadow: 0 0 8px var(--core-color)"></div> IDENTITY_ANCHOR</div>
-            <div class="legend-item" style="color: var(--doc-glow)" title="Non-core shards containing general knowledge or project data."><div class="legend-color" style="background: var(--doc-glow); box-shadow: 0 0 8px var(--doc-glow)"></div> SYSTEM_KNOWLEDGE</div>
             <div class="legend-item" style="color: #ffffff" title="Evicted shards stored in the Archival Vessel. Displayed as small white dwarfs in the outer system."><div class="legend-color" style="background: #ffffff; box-shadow: 0 0 8px rgba(255, 255, 255, 0.6)"></div> ARCHIVED_MEMORY</div>
-            <div class="legend-item" style="color: #5ef3ff" title="A group of shards with high internal connectivity, indicating a specific topic."><div class="legend-color" style="background: #5ef3ff; box-shadow: 0 0 8px #5ef3ff"></div> SEMANTIC_COMMUNITY</div>
-            
+            <div class="legend-item" title="Active shards colored by community. Each neighborhood gets a distinct color.">
+                <div style="display: flex; gap: 3px; margin-right: 10px;">
+                    <div class="legend-color" style="background: #5ef3ff; box-shadow: 0 0 6px #5ef3ff"></div>
+                    <div class="legend-color" style="background: #00d4ff; box-shadow: 0 0 6px #00d4ff"></div>
+                    <div class="legend-color" style="background: #70a1ff; box-shadow: 0 0 6px #70a1ff"></div>
+                    <div class="legend-color" style="background: #a371f7; box-shadow: 0 0 6px #a371f7"></div>
+                    <div class="legend-color" style="background: #58a6ff; box-shadow: 0 0 6px #58a6ff"></div>
+                </div>
+                <span style="color: #8b949e">COMMUNITY_COLORS</span>
+            </div>
+            <div class="legend-encoding">SIZE = CENTRALITY | GLOW = SURVIVAL</div>
+
             <div style="margin-top: 20px;">
                 <h4 style="font-size: 9px; color: var(--text-muted); letter-spacing: 1px; margin-bottom: 10px;" title="Detected clusters of related shards via Louvain Community Detection.">ACTIVE_NEIGHBORHOODS</h4>
                 <div id="neighborhoods-list" style="display: flex; flex-wrap: wrap; gap: 5px;">
@@ -46,11 +55,17 @@
         </div>
     </div>
 
+    <div id="community-summary">
+        <div class="comm-label">COMMUNITY_SUMMARY</div>
+        <div id="comm-summary-text"></div>
+    </div>
+
     <div id="bottom-toolbar">
         <div class="toolbar-group">
-            <div class="tool-btn" onclick="zoomIn()" title="Zoom In">+</div >
+            <div class="tool-btn" onclick="zoomIn()" title="Zoom In">+</div>
             <div class="tool-btn" onclick="zoomOut()" title="Zoom Out">-</div>
         </div>
+        <span id="zoom-level" style="font-size: 9px; color: var(--text-muted); min-width: 32px; text-align: center; letter-spacing: 1px;">100%</span>
         <div class="toolbar-divider"></div>
         <div class="tool-btn" id="bond-mode-btn" onclick="toggleBondMode()" title="Manual Bonding Mode">BOND_MODE: OFF</div>
         <div class="toolbar-divider"></div>
@@ -64,6 +79,9 @@
         </div>
         <div class="detail-body">
             <div class="detail-field"><span class="detail-label" title="Unique identifier for this specific shard.">SHARD_ID</span> <span class="detail-value" id="det-id" style="color: var(--accent);"></span></div>
+            <div class="detail-field"><span class="detail-label" title="Classification category: core, memory, session, or archived.">SHARD_CATEGORY</span> <span class="detail-value" id="det-category">--</span></div>
+            <div class="detail-field"><span class="detail-label" title="Ingestion source type: manual, github, chat, web_scrape.">SOURCE_TYPE</span> <span class="detail-value" id="det-source-type">--</span></div>
+            <div class="detail-field"><span class="detail-label" title="Source reference URI, file path, or identifier.">SOURCE_REF</span> <span class="detail-value" id="det-source-ref">--</span></div>
             <div class="detail-field"><span class="detail-label" title="Total number of semantic bonds connected to this shard. High density denotes a central 'hub' concept.">NEURAL_DENSITY</span> <span class="detail-value" id="det-density">--</span></div>
             <div class="detail-field"><span class="detail-label" title="Relational Centrality (PageRank) of this shard. High score indicates a key node in the semantic graph.">RELATIONAL_CENTRALITY</span> <span class="detail-value" id="det-rank">--</span></div>
             <div class="detail-field"><span class="detail-label" title="Estimated survival score based on centrality, density, and age. Low scores are targeted for eviction.">SURVIVAL_SCORE</span> <span class="detail-value" id="det-survival">--</span></div>
@@ -122,6 +140,12 @@
         </div>
     </div>
 
+    <div id="bond-mode-badge">● BOND_EDIT_MODE</div>
+    <div id="node-tooltip">
+        <div class="tooltip-id"></div>
+        <div class="tooltip-category"></div>
+        <div class="tooltip-content"></div>
+    </div>
     <svg id="viz"></svg>
 
     <div id="activity-feed">
@@ -132,6 +156,7 @@
                 <span onclick="clearLogs()" style="cursor:pointer; color: var(--accent); font-size: 9px; letter-spacing: 1px;">CLEAR</span>
             </div>
         </div>
+        <div class="log-filter-bar" id="log-filter-bar"></div>
         <div id="log-container"></div>
     </div>
 

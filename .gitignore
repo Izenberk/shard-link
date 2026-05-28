@@ -1,6 +1,7 @@
 # Binaries
 bin/
 shard-link
+/visual_ego
 *.exe
 *.exe~
 *.dll

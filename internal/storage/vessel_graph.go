@@ -150,8 +150,11 @@ func (v *VesselGraph) SaveShard(ctx context.Context, s Shard) error {
 
 	_, err := neo4j.ExecuteQuery(ctx, v.driver, query, params, neo4j.EagerResultTransformer,
 		neo4j.ExecuteQueryWithDatabase(v.dbName))
-	if err == nil && GlobalLogger != nil {
-		GlobalLogger(fmt.Sprintf("Shard Saved: %s", s.ID), "success", s.ID)
+	if err == nil {
+		MarkMeshDirty()
+		if GlobalLogger != nil {
+			GlobalLogger(fmt.Sprintf("Shard Saved: %s", s.ID), "success", s.ID)
+		}
 	}
 	log.Printf("[Vessel] Shard Saved: %s (Category: %s)", s.ID, s.Category)
 
@@ -761,9 +764,18 @@ func (v *VesselGraph) SearchGraph(ctx context.Context, queryVector []byte, limit
 	
 	// Multi-Hop: Find the center AND its connected neighbors + relationships
 	var query string
+	// topK: find multiple center nodes so different queries produce different results
+	topK := limit
+	if topK < 3 {
+		topK = 3
+	}
+	if topK > 20 {
+		topK = 20
+	}
+
 	if shouldTouch {
 		query = `
-		CALL db.index.vector.queryNodes('shard_embeddings', 1, $vector)
+		CALL db.index.vector.queryNodes('shard_embeddings', $topK, $vector)
 		YIELD node AS center, score
 		SET center.last_used = datetime(),
 			center.use_count = coalesce(center.use_count, 0) + 1
@@ -780,7 +792,7 @@ func (v *VesselGraph) SearchGraph(ctx context.Context, queryVector []byte, limit
 		`
 	} else {
 		query = `
-		CALL db.index.vector.queryNodes('shard_embeddings', 1, $vector)
+		CALL db.index.vector.queryNodes('shard_embeddings', $topK, $vector)
 		YIELD node AS center, score
 		WITH center
 		OPTIONAL MATCH (center)-[r:CONNECTED_TO]-(neighbor:Shard)
@@ -794,6 +806,7 @@ func (v *VesselGraph) SearchGraph(ctx context.Context, queryVector []byte, limit
 	}
 	params := map[string]any{
 		"vector": vec,
+		"topK":   int64(topK),
 	}
 
 	result, err := neo4j.ExecuteQuery(ctx, v.driver, query, params, neo4j.EagerResultTransformer,

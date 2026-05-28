@@ -19,9 +19,10 @@ type Synthesizer struct {
 	summarizer storage.Summarizer
 	interval   time.Duration
 	threshold  float64
+	logger     storage.LogFunc
 }
 
-func NewSynthesizer(v storage.Repository, interval time.Duration, emb storage.Embedder, sum storage.Summarizer) *Synthesizer {
+func NewSynthesizer(v storage.Repository, interval time.Duration, emb storage.Embedder, sum storage.Summarizer, logger storage.LogFunc) *Synthesizer {
 	tStr := os.Getenv("MESH_LINK_THRESHOLD")
 	threshold, err := strconv.ParseFloat(tStr, 64)
 	if err != nil {
@@ -34,6 +35,13 @@ func NewSynthesizer(v storage.Repository, interval time.Duration, emb storage.Em
 		summarizer: sum,
 		interval:   interval,
 		threshold:  threshold,
+		logger:     logger,
+	}
+}
+
+func (s *Synthesizer) logActivity(msg, category, shardID string) {
+	if s.logger != nil {
+		s.logger(msg, category, shardID)
 	}
 }
 
@@ -54,9 +62,15 @@ func (s *Synthesizer) Run(ctx context.Context) {
 }
 
 func (s *Synthesizer) performSynthesis(ctx context.Context) {
+	if !storage.IsMeshDirty() {
+		log.Println("[Synthesizer] Mesh idle — skipping cycle")
+		return
+	}
+
 	log.Println("[Synthesizer] Analyzing Knowledge Mesh for new semantic bonds...")
 
 	count, err := s.vessel.SyncBonds(ctx, s.threshold)
+	storage.ClearMeshDirty()
 	if err != nil {
 		log.Printf("[Synthesizer ERROR] Failed to sync bonds: %v", err)
 		return
@@ -64,16 +78,19 @@ func (s *Synthesizer) performSynthesis(ctx context.Context) {
 
 	if count > 0 {
 		log.Printf("[Synthesizer] Aha! Established %d new semantic bonds autonomously.", count)
+		s.logActivity(fmt.Sprintf("Synthesizer: %d new semantic bonds forged autonomously", count), "bond", "")
 
 		// After linking, trigger community refresh asynchronously to avoid blocking
 		go func() {
 			log.Println("[Synthesizer] Refreshing Knowledge Neighborhoods (Louvain)...")
+			s.logActivity("Synthesizer: refreshing Knowledge Neighborhoods...", "info", "")
 			bgCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
 
 			_, changedCommunities, err := s.vessel.CalculateCommunities(bgCtx)
 			if err != nil {
 				log.Printf("[Synthesizer ERROR] Failed to calculate communities: %v", err)
+				s.logActivity(fmt.Sprintf("Synthesizer: community calculation failed — %v", err), "error", "")
 				return
 			}
 
@@ -83,6 +100,7 @@ func (s *Synthesizer) performSynthesis(ctx context.Context) {
 		}()
 	} else {
 		log.Println("[Synthesizer] No new relationships identified in this cycle.")
+		s.logActivity("Synthesizer: no new relationships in this cycle", "system", "")
 	}
 }
 
@@ -98,11 +116,13 @@ func (s *Synthesizer) summarizeCommunities(communityIDs []int64) {
 		members, err := s.vessel.GetShardsByCommunity(ctx, cid)
 		if err != nil {
 			log.Printf("[Synthesizer ERROR] Failed to fetch community %d members: %v", cid, err)
+			s.logActivity(fmt.Sprintf("Synthesizer: failed to fetch community %d members — %v", cid, err), "error", "")
 			continue
 		}
 
-		// Skip communities with fewer than 2 members — no meaningful summary
-		if len(members) < 2 {
+		// Skip small communities — a 2-member cluster is trivially readable without LLM help
+		if len(members) < 3 {
+			log.Printf("[Synthesizer] Skipping community %d — only %d members (min: 3)", cid, len(members))
 			continue
 		}
 
@@ -112,6 +132,7 @@ func (s *Synthesizer) summarizeCommunities(communityIDs []int64) {
 		summary, err := s.summarizer.Summarize(ctx, prompt)
 		if err != nil {
 			log.Printf("[Synthesizer ERROR] Failed to summarize community %d: %v", cid, err)
+			s.logActivity(fmt.Sprintf("Synthesizer: failed to summarize community %d — %v", cid, err), "error", "")
 			continue
 		}
 
@@ -119,6 +140,7 @@ func (s *Synthesizer) summarizeCommunities(communityIDs []int64) {
 		vec, err := s.embedder.Embed(ctx, summary)
 		if err != nil {
 			log.Printf("[Synthesizer ERROR] Failed to embed community %d summary: %v", cid, err)
+			s.logActivity(fmt.Sprintf("Synthesizer: failed to embed community %d summary — %v", cid, err), "error", "")
 			continue
 		}
 
@@ -134,10 +156,12 @@ func (s *Synthesizer) summarizeCommunities(communityIDs []int64) {
 
 		if err := s.vessel.SaveShard(ctx, shard); err != nil {
 			log.Printf("[Synthesizer ERROR] Failed to save community %d summary shard: %v", cid, err)
+			s.logActivity(fmt.Sprintf("Synthesizer: failed to save community %d summary — %v", cid, err), "error", shardID)
 			continue
 		}
 
 		log.Printf("[Synthesizer] Community %d summarized and saved as %s (%d members)", cid, shardID, len(members))
+		s.logActivity(fmt.Sprintf("Community %d summarized -> %s (%d members)", cid, shardID, len(members)), "success", shardID)
 
 		// Rate limit: 2-second delay between Gemini API calls (free tier: 15 RPM)
 		if i < len(communityIDs)-1 {

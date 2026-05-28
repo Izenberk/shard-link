@@ -43,13 +43,16 @@ func broadcastActivity(e ActivityEntry) {
 }
 
 type VizNode struct {
-	ID        string  `json:"id"`
-	Category  string  `json:"category"`
-	Content   string  `json:"content"`
-	Community int64   `json:"community"`
-	PageRank  float64 `json:"pagerank"`
-	Survival  float64 `json:"survival"`
-	CreatedAt string  `json:"created_at"`
+	ID         string  `json:"id"`
+	Category   string  `json:"category"`
+	Content    string  `json:"content"`
+	Community  int64   `json:"community"`
+	PageRank   float64 `json:"pagerank"`
+	Survival   float64 `json:"survival"`
+	CreatedAt  string  `json:"created_at"`
+	SourceType string  `json:"source_type"`
+	SourceRef  string  `json:"source_ref"`
+	Confidence float64 `json:"confidence"`
 }
 
 type VizLink struct {
@@ -178,6 +181,7 @@ func main() {
 	http.HandleFunc("/api/activity", srv.handleActivity)
 	http.HandleFunc("/api/logs", srv.handleGetLogs)
 	http.HandleFunc("/api/evict", srv.handleEvict)
+	http.HandleFunc("/api/community", srv.handleGetCommunity)
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "OK. Booted: %v", srv.bootTime.Format(time.RFC3339))
 	})
@@ -215,7 +219,12 @@ func (s *Server) handleEvict(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. Move to Archival Vessel (Postgres)
+	// 2. Log manual eviction intent
+	if storage.GlobalLogger != nil {
+		storage.GlobalLogger(fmt.Sprintf("Manual eviction initiated: %s", id), "warn", id)
+	}
+
+	// 3. Move to Archival Vessel (Postgres)
 	if s.archivalVessel != nil {
 		shard.Category = "archived" // Mark as White Dwarf
 		// Use the dedicated ArchiveShard method which handles the move to shards_archive
@@ -241,7 +250,7 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Persistent logging not available", 500)
 		return
 	}
-	logs, err := s.localVessel.GetRecentActivity(r.Context(), 50)
+	logs, err := s.localVessel.GetRecentActivity(r.Context(), 200)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -296,6 +305,9 @@ func (s *Server) handleBonds(w http.ResponseWriter, r *http.Request) {
 			log.Printf("[API ERROR] Failed to save bond: %v", err)
 			http.Error(w, err.Error(), 500)
 			return
+		}
+		if storage.GlobalLogger != nil {
+			storage.GlobalLogger(fmt.Sprintf("Manual bond created: %s <-> %s", b.FromID, b.ToID), "bond", b.FromID)
 		}
 		w.WriteHeader(http.StatusCreated)
 
@@ -365,6 +377,11 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("[API] Searching Mesh: %s", query)
+	if s.embedder == nil {
+		log.Printf("[API ERROR] Embedder not available for search")
+		http.Error(w, `{"error":"Embedder not initialized. Check GEMINI_API_KEY."}`, 503)
+		return
+	}
 	floats, err := s.embedder.Embed(r.Context(), query)
 	if err != nil {
 		log.Printf("[API ERROR] Embedding failed for query '%s': %v", query, err)
@@ -380,8 +397,35 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("[API] Found %d shards and %d bonds for query: %s", len(shards), len(bonds), query)
+	if storage.GlobalLogger != nil {
+		storage.GlobalLogger(fmt.Sprintf("Dashboard search: '%s' -> %d shards found", query, len(shards)), "search", "")
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(s.packData(shards, bonds))
+}
+
+func (s *Server) handleGetCommunity(w http.ResponseWriter, r *http.Request) {
+	idStr := r.URL.Query().Get("id")
+	if idStr == "" {
+		http.Error(w, "community id required", 400)
+		return
+	}
+
+	shardID := fmt.Sprintf("comm-summary-%s", idStr)
+	shard, err := s.vessel.GetShardByID(r.Context(), shardID)
+
+	type CommunityResponse struct {
+		Summary     string `json:"summary"`
+		CommunityID string `json:"community_id"`
+	}
+
+	resp := CommunityResponse{CommunityID: idStr}
+	if err == nil {
+		resp.Summary = shard.Content
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) packData(shards []storage.Shard, bonds []storage.ShardBond) VizData {
@@ -446,13 +490,16 @@ func (s *Server) packData(shards []storage.Shard, bonds []storage.ShardBond) Viz
 		}
 
 		data.Nodes[i] = VizNode{
-			ID:        s.ID,
-			Category:  s.Category,
-			Content:   s.Content,
-			Community: s.CommunityID,
-			PageRank:  s.PageRank,
-			Survival:  survival,
-			CreatedAt: s.CreatedAt.Format("2006-01-02 15:04:05"),
+			ID:         s.ID,
+			Category:   s.Category,
+			Content:    s.Content,
+			Community:  s.CommunityID,
+			PageRank:   s.PageRank,
+			Survival:   survival,
+			CreatedAt:  s.CreatedAt.Format("2006-01-02 15:04:05"),
+			SourceType: s.SourceType,
+			SourceRef:  s.SourceRef,
+			Confidence: s.Confidence,
 		}
 	}
 	for i, b := range bonds {

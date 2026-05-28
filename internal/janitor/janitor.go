@@ -2,6 +2,7 @@ package janitor
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 
@@ -15,16 +16,24 @@ type Scorer interface {
 
 // Janitor handles background size management.
 type Janitor struct {
-	vessel 		storage.Repository
-	interval 	time.Duration
-	maxSize 	int		// Maximum number if shards before eviction starts
+	vessel   storage.Repository
+	interval time.Duration
+	maxSize  int // Maximum number of shards before eviction starts
+	logger   storage.LogFunc
 }
 
-func NewJanitor(v storage.Repository, interval time.Duration, maxSize int) *Janitor {
-	return &Janitor {
-		vessel: v,
+func NewJanitor(v storage.Repository, interval time.Duration, maxSize int, logger storage.LogFunc) *Janitor {
+	return &Janitor{
+		vessel:   v,
 		interval: interval,
-		maxSize: maxSize,
+		maxSize:  maxSize,
+		logger:   logger,
+	}
+}
+
+func (j *Janitor) logActivity(msg, category, shardID string) {
+	if j.logger != nil {
+		j.logger(msg, category, shardID)
 	}
 }
 
@@ -52,13 +61,17 @@ func (j *Janitor) performCleanup(ctx context.Context) {
 		return
 	}
 
+	j.logActivity(fmt.Sprintf("Janitor cycle started. Shard count: %d/%d", count, j.maxSize), "system", "")
+
 	if count <= j.maxSize {
 		log.Printf("[Janitor] Vessel within limits (%d/%d). No action needed.", count, j.maxSize)
-		return		// Vessel is within safe limits
+		j.logActivity(fmt.Sprintf("Janitor: mesh within limits (%d/%d)", count, j.maxSize), "system", "")
+		return // Vessel is within safe limits
 	}
 
 	overage := count - j.maxSize
 	log.Printf("[Janitor] Shard overage detected (+%d). Identifying eviction candidates...", overage)
+	j.logActivity(fmt.Sprintf("Overage detected: +%d shards above limit", overage), "warn", "")
 
 	candidates, err := j.vessel.GetEvictionCandidates(ctx, overage)
 	if err != nil {
@@ -68,6 +81,7 @@ func (j *Janitor) performCleanup(ctx context.Context) {
 
 	for _, id := range candidates {
 		log.Printf("[Janitor] Evicting shard: %s", id)
+		j.logActivity(fmt.Sprintf("Janitor evicted: %s", id), "evict", id)
 		_ = j.vessel.ArchiveShard(ctx, id)
 	}
 
@@ -76,4 +90,5 @@ func (j *Janitor) performCleanup(ctx context.Context) {
 		_ = j.vessel.Optimize(ctx)
 	}
 	log.Println("[Janitor] Cleanup cycle complete.")
+	j.logActivity(fmt.Sprintf("Janitor cycle complete. Evicted: %d", len(candidates)), "system", "")
 }
