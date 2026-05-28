@@ -10,10 +10,10 @@
 - Google Doc: Architectural Upgrades & Roadmap (SSE/Docker done — K8s absorbed here)  
 - Repo: `GRAPH_IMPROVEMENT.md` (all items absorbed — retire this file after commit)
 
-**Does NOT replace (frozen, append-only):**
+**Also absorbs (previously frozen, now consolidated here):**
 
-- `PLAN.md` — feature phase history  
-- `IMPROVEMENT.md` — resolved bottleneck log
+- `PLAN.md` — feature phase history (see Appendix A below)
+- `IMPROVEMENT.md` — resolved bottleneck log (see Appendix B below)
 
 ---
 
@@ -1203,7 +1203,147 @@ Genuine new feature work. Not bug fixes, not hardening. Do not start until Phase
 | Storage Architecture Upgrade Plan | Google Docs | Archived — absorbed into Phases 1–3 |
 | Next-Gen Architecture & Cognitive Upgrades | Google Docs | Archived — 3/5 items shipped in Phase 9, 2 items in Phase 6 |
 | Architectural Upgrades & Roadmap | Google Docs | Archived — SSE/Docker done, K8s in Phase 6.5 |
-| `GRAPH_IMPROVEMENT.md` | Repo | Retire — delete after this commit |
+| `GRAPH_IMPROVEMENT.md` | Repo | Deleted — fully absorbed into Phase 4 |
+| `PLAN.md` | Repo | Deleted — consolidated into Appendix A below |
+| `IMPROVEMENT.md` | Repo | Deleted — consolidated into Appendix B below |
+| `DOCS.md` | Repo | Deleted — duplicated in `.claude/CLAUDE.md` |
+| `ABOUTME.md` | Repo | Deleted — duplicated in `.claude/CLAUDE.md` |
+
+---
+
+## Appendix A: Feature Phase History (formerly PLAN.md)
+
+> Frozen record of Phases 1–11. All items complete as of 2026-05-16.
+
+### Phase 1: Environment & Tooling (Config Layer)
+- [x] Initialize `go.mod` and add dependencies (`ncruces/go-sqlite3` v0.33+).
+- [x] Setup Docker Compose for dual-boot (Ubuntu/Windows 11) using bind-mounts to the shared NTFS/ExFAT partition.
+- [x] Verify manual `vec_distance_cosine` (Go) integration in `cmd/check_vec`.
+
+### Phase 2: The Vessel (Storage Layer)
+- [x] Define `Shard` and `ShardBond` structs with JSONB metadata support.
+- [x] Create `schema.sql` with Tiered Storage support (`shards_archive`).
+- [x] Implement `Vessel.SaveShard` with Upsert logic.
+- [x] Implement `Vessel.FindResonant` using Go-based `vec_distance_cosine` function.
+- [x] Implement `Vessel.ArchiveShard` for fading memories to the Basement.
+
+### Phase 3: The Janitor (Resonance & Eviction)
+- [x] Implement the `Scorer` interface for importance calculation.
+- [x] Implement the Standardized Eviction Hierarchy.
+- [x] Implement `sync.Pool` for vector buffer optimization.
+- [x] Setup a background worker to run the Janitor on a configurable interval.
+
+### Phase 4: Model Context Protocol (The Bridge)
+- [x] Setup the MCP JSON-RPC server over SSE (Server-Sent Events).
+- [x] Implement `mcp.ListTools` (to expose memory search as a tool).
+- [x] Implement `mcp.CallTool` to execute `FindResonant` searches.
+- [x] Implement `mcp.ListResources` (to expose the "Core Shard" as a system resource).
+
+### Phase 5: Deployment & Privacy (The Cloud)
+- [x] Configure `cloudflared` (Cloudflare Tunnel) in Docker Compose.
+- [x] Implement mutual TLS (mTLS) for the MCP endpoint. (Refactored to Token-Auth in Phase 6).
+- [x] Final end-to-end testing between local Go container and local AI agent.
+
+### Phase 6: Zero-Proxy Access (Authentication Refactor)
+- [x] Implement API Key / Token Middleware in the MCP server.
+- [x] Refactor `StartSSE` to remove mTLS debt in favor of Defense in Depth (Token + HTTPS).
+- [x] Update `settings.json` with custom `headers` for direct, secure remote connection.
+
+### Phase 7: High-Performance Scaling (PostgreSQL & pgvector)
+- [x] Implement the Repository Pattern to abstract the storage layer.
+- [x] Migrate from SQLite to PostgreSQL + pgvector to offload 1536-D math to SQL (SIMD).
+- [x] Refactor Janitor to use a Composite Survival Score.
+- [x] Update the `Vessel` to support Multi-Tenant shard ownership (UserID field).
+
+### Phase 8: The Knowledge Mesh (GraphDB Integration)
+- [x] Infrastructure Swap: Added Neo4j to `docker-compose.yml` with APOC and GDS support.
+- [x] Graph Repository: Implemented `VesselGraph` in Go.
+- [x] Data Integrity & Sync: Developed `cmd/repair_vec` and `cmd/migrate`.
+- [x] Auto-Linker: Implemented `cmd/auto_link` for automatic semantic bonds.
+- [x] Native Centrality: Refactored Janitor to use PageRank via GDS.
+- [x] Multi-Hop Retrieval: Implemented `search_graph` MCP tool.
+- [x] Visual Ego: Exposed a read-only graph visualizer.
+- [x] Mesh Consistency Checker: Added `cmd/check_mesh`.
+
+### Phase 9: Memory Integrity (Claude Improvements)
+- [x] Source Provenance: Add `source_type`, `source_ref`, and `confidence` to the Shard schema.
+- [x] Hybrid Retrieval: Implement Reciprocal Rank Fusion (RRF).
+- [x] MMR Retrieval: Implement Maximal Marginal Relevance.
+- [x] Storage Hygiene: Implement HNSW tuning, partial indexes, and automated VACUUM/REINDEX.
+
+### Phase 10: Standalone Intelligence (Local Inference)
+- [x] Direct Access: Implemented MCP Prompt for direct slash-command retrieval (`/shard`).
+- [x] Stability Patch: Optimized SSE KeepAlive (15s) and Neo4j heap sizing (2GB).
+- [x] Intelligence Abstraction: Defined the `Embedder` interface.
+- [x] Cloud Embedder: Implemented Gemini API integration.
+- [x] Configurable Modes: Added `EMBEDDING_MODE` (none, server, local).
+- [x] Local Embedding: Implemented the `OllamaEmbedder` provider.
+- [x] Resonance-Aware Janitor: Integrated Core Resonance protection and PageRank centrality.
+- [x] Visual Ego Live: Converted to dynamic, real-time HTTP dashboard.
+
+### Phase 11: Autonomous Memory (Relational Synthesis)
+- [x] Background Synthesis: Refactor `auto_link` logic into a background worker.
+- [x] On-Save Linking: Automatically trigger similarity checks on new shard save.
+- [x] Clustering Analytics: Expose Louvain community labels in Visual Ego dashboard.
+- [x] Interactive Edges: Manual bond creation/breaking via Visual Ego UI.
+
+*Phase History Status: PHASE 11 COMPLETE | Date: 2026-05-16*
+
+---
+
+## Appendix B: Resolved Bottlenecks (formerly IMPROVEMENT.md)
+
+> Frozen log of architectural bottlenecks and their resolutions.
+
+### Vector Math Performance Bottleneck (2026-05-10)
+**Problem:** 1536-D vector cosine distances in Go caused massive heap allocations (6KB per vector) and GC pauses.
+**Solution:** Migrated to PostgreSQL + pgvector. Vector math offloaded to native SQL SIMD operators (`<=>`). Retrieval times stabilized to sub-5ms.
+
+### Flawed Janitor Eviction Logic (2026-05-10)
+**Problem:** Deterministic recency filtering deleted "load-bearing" old shards and kept irrelevant new orphans.
+**Solution:** Composite Survival Score: `(Links * Centrality) / (Time^Decay)`.
+
+### Visual Ego Live Dashboard (2026-05-16)
+**Problem:** Static HTML generator requiring manual rebuild.
+**Solution:** Converted to live Go HTTP server with `/api/graph` and `/api/search`.
+
+### Local Embedding Pipeline (2026-05-16)
+**Problem:** Dependency on external Gemini API.
+**Solution:** `OllamaEmbedder` provider with `EMBEDDING_MODE=local`.
+
+### Janitor Refinement: Graph Centrality & Core Resonance (2026-05-16)
+**Problem:** Eviction logic was purely structural.
+**Solution:** Core Resonance Protection (>0.70 threshold) + PageRank Centrality via GDS.
+
+### Enhanced Observability & Metric Definitions (2026-05-17)
+**Problem:** Dashboard metrics lacked explanation.
+**Solution:** Context-aware tooltips and standardized terminology.
+
+### Usage Reinforcement & Long-Term Potentiation (2026-05-17)
+**Problem:** Survival based only on creation date.
+**Solution:** LTP logic — `LastUsed` decay, Touch-on-Search, Vitality Boost (+10%/hit).
+
+### Persistent Activity Ledger & Cross-Process Auditing (2026-05-17)
+**Problem:** In-memory logs vanished on refresh; MCP actions invisible to dashboard.
+**Solution:** Shared SQLite Activity Ledger with log hydration on startup.
+
+### HUD Redesign & Ergonomic Command Bar (2026-05-17)
+**Problem:** UI clutter from overlapping panels.
+**Solution:** Floating Command Bar, unified Knowledge Sidebar, dedicated Activity Terminal.
+
+### MCP Stability & Startup Resilience (2026-05-17)
+**Problem:** Hub crashed during slow Neo4j plugin installation; Cloudflare timeouts on idle SSE.
+**Solution:** 15-attempt retry loop, healthcheck orchestration, 10s heartbeats, non-blocking Synthesizer.
+
+### Surgical Archival & Dynamic Perimeter (2026-05-19)
+**Problem:** Manual eviction permanently deleted data; no Core Identity protection.
+**Solution:** "White Dwarf" Archival Model — multi-vessel migration, double-lock protection, dynamic orbital physics.
+
+### Streamable HTTP Transport Migration (2026-05-21)
+**Problem:** Legacy SSE transport dropped by Cloudflare tunnel due to idle timeouts.
+**Solution:** Migrated to Streamable HTTP (MCP spec 2024-11-05) on `/mcp`. Legacy SSE kept on `/sse` for backward compatibility.
+
+*Bottleneck Log Last Updated: 2026-05-21*
 
 ---
 
