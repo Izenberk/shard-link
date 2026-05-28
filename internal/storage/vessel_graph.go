@@ -443,6 +443,36 @@ func (v *VesselGraph) CalculateCommunities(ctx context.Context) (int, []int64, e
 	return len(newCache), changedCommunities, nil
 }
 
+// PruneStaleSummaries removes comm-summary-* shards whose community ID
+// no longer matches any active (non-summary) shard's community assignment.
+// This prevents duplicate summaries from accumulating across Louvain reclustering runs.
+func (v *VesselGraph) PruneStaleSummaries(ctx context.Context) (int, error) {
+	query := `
+	MATCH (active:Shard) WHERE NOT active.id STARTS WITH 'comm-summary-'
+	WITH collect(DISTINCT active.community) AS activeCommunities
+	MATCH (summary:Shard) WHERE summary.id STARTS WITH 'comm-summary-'
+	WITH summary, activeCommunities,
+	     toInteger(replace(summary.id, 'comm-summary-', '')) AS summaryCommID
+	WHERE NOT summaryCommID IN activeCommunities
+	DETACH DELETE summary
+	RETURN count(*) AS pruned
+	`
+
+	result, err := neo4j.ExecuteQuery(ctx, v.driver, query, nil,
+		neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithDatabase(v.dbName))
+	if err != nil {
+		return 0, fmt.Errorf("prune stale summaries: %w", err)
+	}
+
+	if len(result.Records) > 0 {
+		pruned, _ := result.Records[0].Get("pruned")
+		return int(pruned.(int64)), nil
+	}
+
+	return 0, nil
+}
+
 func (v *VesselGraph) GetShardsByCommunity(ctx context.Context, communityID int64) ([]Shard, error) {
 	query := `
 	MATCH (s:Shard {community: $communityID})

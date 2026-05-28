@@ -410,6 +410,10 @@ func (v *PostgresVessel) CalculateCommunities(ctx context.Context) (int, []int64
 	return 0, nil, nil
 }
 
+func (v *PostgresVessel) PruneStaleSummaries(ctx context.Context) (int, error) {
+	return 0, nil
+}
+
 func (v *PostgresVessel) GetShardsByCommunity(ctx context.Context, communityID int64) ([]Shard, error) {
 	return nil, nil
 }

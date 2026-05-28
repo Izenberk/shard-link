@@ -26,6 +26,7 @@ type Repository interface {
 	GetGraphData(ctx context.Context) ([]Shard, []ShardBond, error)
 	CalculateCommunities(ctx context.Context) (int, []int64, error)
 	GetShardsByCommunity(ctx context.Context, communityID int64) ([]Shard, error)
+	PruneStaleSummaries(ctx context.Context) (int, error)
 	SyncBonds(ctx context.Context, threshold float64) (int, error)
 	ReinforceShards(ctx context.Context, ids []string) error
 

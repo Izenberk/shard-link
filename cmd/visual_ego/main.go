@@ -182,6 +182,7 @@ func main() {
 	http.HandleFunc("/api/logs", srv.handleGetLogs)
 	http.HandleFunc("/api/evict", srv.handleEvict)
 	http.HandleFunc("/api/community", srv.handleGetCommunity)
+	http.HandleFunc("/api/prune-summaries", srv.handlePruneSummaries)
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "OK. Booted: %v", srv.bootTime.Format(time.RFC3339))
 	})
@@ -426,6 +427,30 @@ func (s *Server) handleGetCommunity(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) handlePruneSummaries(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	log.Println("[API] Manual prune-summaries triggered")
+	pruned, err := s.vessel.PruneStaleSummaries(r.Context())
+	if err != nil {
+		log.Printf("[API ERROR] Prune failed: %v", err)
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	msg := fmt.Sprintf("Pruned %d stale community summaries", pruned)
+	log.Printf("[API] %s", msg)
+	if storage.GlobalLogger != nil {
+		storage.GlobalLogger(msg, "system", "")
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"pruned": pruned})
 }
 
 func (s *Server) packData(shards []storage.Shard, bonds []storage.ShardBond) VizData {

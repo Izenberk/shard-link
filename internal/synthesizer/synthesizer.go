@@ -94,6 +94,16 @@ func (s *Synthesizer) performSynthesis(ctx context.Context) {
 				return
 			}
 
+			// Prune stale comm-summary-* shards whose community IDs
+			// no longer exist after Louvain reclustering.
+			pruned, err := s.vessel.PruneStaleSummaries(bgCtx)
+			if err != nil {
+				log.Printf("[Synthesizer ERROR] Failed to prune stale summaries: %v", err)
+			} else if pruned > 0 {
+				log.Printf("[Synthesizer] Pruned %d stale community summaries", pruned)
+				s.logActivity(fmt.Sprintf("Synthesizer: pruned %d stale community summaries", pruned), "system", "")
+			}
+
 			if len(changedCommunities) > 0 && s.summarizer != nil && s.embedder != nil {
 				s.summarizeCommunities(changedCommunities)
 			}
