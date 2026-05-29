@@ -27,6 +27,11 @@ Shard-Link is a high-performance context engine providing "long-term memory" for
 - **The Janitor:** Background eviction process based on Resonance + Relational Centrality
 - **The Synthesizer:** Background linker that autonomously bonds resonant shards
 - **HygieneWorker:** Background maintenance (VACUUM, index integrity)
+- **Survival Formula v4.0:** `S = min(95, (D*(C+1)*10*A(m)*Sal) / e^(Δt/A(m)))` — cognitive-science-backed eviction scoring
+- **ACT-R Activation:** `A(m) = ln(Σ tᵢ⁻ᵈ) + ε` — memory activation from retrieval history (replaces raw use_count)
+- **Salience:** LLM-scored importance [0.1, 1.0] assigned at save time — trivial shards decay faster
+- **Episodes:** MCP session chains — shards linked to `Episode` nodes via `EPISODE_OF` for temporal narrative recall
+- **RetrievalHistory:** Rolling window of last 20 retrieval timestamps per shard — feeds ACT-R activation
 
 ## Thresholds (env vars)
 - `MESH_LINK_THRESHOLD` — min cosine similarity for auto-linking (default: 0.75)

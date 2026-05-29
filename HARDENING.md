@@ -1,6 +1,6 @@
 # Shard-Link: Hardening & Upgrade Plan
 
-**Status:** ACTIVE — Single Source of Truth **Author:** BB & Brainy Bestie **Last Updated:** 2026-05-22
+**Status:** ACTIVE — Single Source of Truth **Author:** BB & Brainy Bestie **Last Updated:** 2026-05-29
 
 **Absorbs and supersedes:**
 
@@ -1158,6 +1158,28 @@ Genuine new feature work. Not bug fixes, not hardening. Do not start until Phase
 
 **Status:** Implemented. Run `gen_vec` post-deploy to re-embed existing shards.
 
+- [x] **6.6 Cognitive Science Formula Upgrade (v4.0)** \[Priority 1 from COGNITIVE\_RESEARCH.md\]
+
+**What:** Replaced the intuitive v3.5 survival formula with research-backed cognitive science models. Three core changes:
+
+1. **ACT-R Activation** replaces raw `use_count` — weighs *when* retrievals happened via `A(m) = ln(Σ tᵢ⁻ᵈ) + ε`. Each shard stores a rolling window of the last 20 retrieval timestamps (`RetrievalHistory []time.Time`).
+2. **Exponential Decay** replaces linear time division — matches the Ebbinghaus forgetting curve. High-activation shards decay slower because `A(m)` appears in the exponent's denominator.
+3. **LLM-Scored Salience** adds importance weighting — at `save_memory` time, the summarizer rates each shard `[0.1, 1.0]`. Trivial shards decay 10x faster than critical ones.
+
+Plus **Episodic Session Chains** (Idea C from COGNITIVE\_RESEARCH.md): shards saved in the same MCP session are linked to `Episode` nodes via `EPISODE_OF` relationships, enabling temporal narrative recall.
+
+**Files changed:**
+- `internal/storage/cognitive.go` (NEW) — Pure math module: `CalculateACTRActivation`, `SurvivalScoreV4`, `SurvivalScoreV35`
+- `internal/storage/shard.go` — Added `Salience float64`, `RetrievalHistory []time.Time`
+- `internal/storage/vessel_graph.go` — Persistence, deserialization, all 4 touch paths append to `retrieval_history[-20..]`
+- `internal/mcp/server.go` — Salience scoring in `handleSave`, episodic session chain creation
+- `main.go` — Pass summarizer to `NewMCPServer`
+- `cmd/visual_ego/main.go` — Swapped inline v3.5 with `storage.SurvivalScoreV4()`, dual-score `[BENCHMARK]` logging
+
+**Backward compatibility:** Zero migration. Existing shards return `Salience: 0.0` / `RetrievalHistory: nil` from `nodeToShard()`. `packData()` defaults salience to 0.5; `CalculateACTRActivation` returns ε (0.1) for empty history. Cypher `coalesce()` handles missing properties. New fields appear naturally on save/touch.
+
+**Benchmark validation:** Both v3.5 and v4.0 run in parallel via `[BENCHMARK]` logs in Visual Ego. Pass criteria: high-frequency recent shards score higher in v4.0; old untouched shards score lower; core shards remain at 100.
+
 - [ ] **6.5 Kubernetes deployment** \[H2 2026 roadmap\]
 
 **What:** Transition the containerised stack into a local K8s cluster (`minikube` or `k3s`) as the Platform Engineering learning milestone.
@@ -1192,6 +1214,7 @@ Genuine new feature work. Not bug fixes, not hardening. Do not start until Phase
 | 5.3 | MMR lambda param | Low | SHIPPED. MCP param with env var fallback (MMR\_LAMBDA). |
 | 5.4 | Rate limiting | Low | SHIPPED. Per-key 60 req/min, burst 10 via x/time/rate. |
 | 6.4 | Embedding dimension right-sizing | Medium | SHIPPED. 768-D Matryoshka truncation + L2 normalize. ensureIndexes() auto-detects mismatch and recreates Neo4j vector index. Requires gen_vec re-embed post-deploy. |
+| 6.6 | Cognitive Science Formula v4.0 | Medium | SHIPPED. ACT-R activation + exponential decay + LLM salience + episodic sessions. Zero migration — backward compat via defaults. Dual-score benchmark logging validates before Janitor cutover. |
 
 ---
 
@@ -1347,4 +1370,4 @@ Genuine new feature work. Not bug fixes, not hardening. Do not start until Phase
 
 ---
 
-*Status: PHASE 6.4 COMPLETE — Embedding Dimension Right-Sizing shipped | Date: 2026-05-27* *Authors: BB & Brainy Bestie*
+*Status: PHASE 6.6 COMPLETE — Cognitive Science Formula v4.0 + Episodic Sessions shipped | Date: 2026-05-29* *Authors: BB & Brainy Bestie*
