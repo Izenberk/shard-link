@@ -483,36 +483,24 @@ func (s *Server) packData(shards []storage.Shard, bonds []storage.ShardBond) Viz
 			}
 		}
 
-		hoursSince := time.Since(lastUsed).Hours()
-		if hoursSince < 1 {
-			hoursSince = 1
+		links := bondCounts[s.ID]
+
+		// Backward compat: unscored shards default to 0.5
+		salience := s.Salience
+		if salience < 0.1 {
+			salience = 0.5
 		}
 
-		// Frequency-Weighted Retention (Long-Term Potentiation)
-		// More hits = slower decay. Each hit adds "Decay Resistance".
-		// We use log2(hits + 1) to provide diminishing returns for extreme popularity.
-		vitality := 1.0
-		if s.UseCount > 1 {
-			// Using 1.0 + math.Log2(float64(s.UseCount)) as a multiplier
-			vitality = 1.0 + (float64(s.UseCount) * 0.1) // Simpler linear boost for now: +10% per hit
-			if vitality > 5.0 {
-				vitality = 5.0 // Cap vitality boost at 5x
-			}
-		}
+		// Dual-score benchmark: v3.5 (legacy) vs v4.0 (cognitive science)
+		v35 := storage.SurvivalScoreV35(links, s.PageRank, s.UseCount, lastUsed)
+		v40 := storage.SurvivalScoreV4(links, s.PageRank, salience, s.RetrievalHistory, lastUsed)
 
-		links := float64(bondCounts[s.ID])
-		// Score = (Density * Centrality * Vitality * 10) / TimeFactor
-		rawScore := (links * (s.PageRank + 1.0) * 10 * vitality) / hoursSince
-		
-		// Normalize to 0-100 scale for UI consistency
-		survival := rawScore
-		if survival > 95 {
-			survival = 95 // Cap non-core at 95 to keep Core as the absolute ceiling
-		}
-
+		survival := v40
 		if s.Category == "core" {
 			survival = 100 // Core shards are the "Gold Standard" (100)
 		}
+
+		log.Printf("[BENCHMARK] shard=%s v35=%.2f v40=%.2f delta=%.2f", s.ID, v35, v40, v40-v35)
 
 		data.Nodes[i] = VizNode{
 			ID:         s.ID,
