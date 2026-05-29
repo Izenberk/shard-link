@@ -133,19 +133,23 @@ func (v *VesselGraph) SaveShard(ctx context.Context, s Shard) error {
 			s.source_ref = $source_ref,
 			s.confidence = $confidence,
 			s.last_used = $last_used,
-			s.created_at = $created_at
+			s.created_at = $created_at,
+			s.salience = $salience,
+			s.retrieval_history = $retrieval_history
 	`
 	params := map[string]any{
-		"id":          s.ID,
-		"category":    s.Category,
-		"content":     s.Content,
-		"embedding":   DecodeVector(s.Vector), // Convert []byte to []float32 for Neo4j
-		"metadata":    string(s.Metadata),
-		"source_type": s.SourceType,
-		"source_ref":  s.SourceRef,
-		"confidence":  s.Confidence,
-		"last_used":   s.LastUsed.Format(time.RFC3339),
-		"created_at":  s.CreatedAt.Format(time.RFC3339),
+		"id":                s.ID,
+		"category":          s.Category,
+		"content":           s.Content,
+		"embedding":         DecodeVector(s.Vector), // Convert []byte to []float32 for Neo4j
+		"metadata":          string(s.Metadata),
+		"source_type":       s.SourceType,
+		"source_ref":        s.SourceRef,
+		"confidence":        s.Confidence,
+		"last_used":         s.LastUsed.Format(time.RFC3339),
+		"created_at":        s.CreatedAt.Format(time.RFC3339),
+		"salience":          s.Salience,
+		"retrieval_history": serializeRetrievalHistory(s.RetrievalHistory),
 	}
 
 	_, err := neo4j.ExecuteQuery(ctx, v.driver, query, params, neo4j.EagerResultTransformer,
@@ -192,7 +196,8 @@ func (v *VesselGraph) FindResonant(ctx context.Context, queryVector []byte, limi
 		CALL db.index.vector.queryNodes('shard_embeddings', $limit, $vector)
 		YIELD node, score
 		SET node.last_used = datetime(),
-			node.use_count = coalesce(node.use_count, 0) + 1
+			node.use_count = coalesce(node.use_count, 0) + 1,
+			node.retrieval_history = (coalesce(node.retrieval_history, []) + [toString(datetime())])[-20..]
 		RETURN node
 		`
 	} else {
@@ -232,7 +237,8 @@ func (v *VesselGraph) ReinforceShards(ctx context.Context, ids []string) error {
 	MATCH (s:Shard)
 	WHERE s.id IN $ids
 	SET s.last_used = toString(datetime()),
-	    s.use_count = coalesce(s.use_count, 0) + 1
+	    s.use_count = coalesce(s.use_count, 0) + 1,
+	    s.retrieval_history = (coalesce(s.retrieval_history, []) + [toString(datetime())])[-20..]
 	`
 	_, err := neo4j.ExecuteQuery(ctx, v.driver, query, map[string]any{"ids": ids}, neo4j.EagerResultTransformer,
 		neo4j.ExecuteQueryWithDatabase(v.dbName))
@@ -567,20 +573,35 @@ func nodeToShard(node neo4j.Node) Shard {
 		}
 	}
 
+	// Cognitive Science Fields (v4.0)
+	var salience float64
+	if sal, ok := props["salience"].(float64); ok {
+		salience = sal
+	} else if sal, ok := props["salience"].(int64); ok {
+		salience = float64(sal)
+	}
+
+	var retrievalHistory []time.Time
+	if rh, ok := props["retrieval_history"].([]any); ok {
+		retrievalHistory = deserializeRetrievalHistory(rh)
+	}
+
 	return Shard{
-		ID:          id,
-		Category:    cat,
-		Content:     cont,
-		Metadata:    []byte(meta),
-		Vector:      vec,
-		SourceType:  srcType,
-		SourceRef:   srcRef,
-		Confidence:  conf,
-		CommunityID: commID,
-		PageRank:    rank,
-		LastUsed:    lu,
-		CreatedAt:   ca,
-		UseCount:    useCount,
+		ID:               id,
+		Category:         cat,
+		Content:          cont,
+		Metadata:         []byte(meta),
+		Vector:           vec,
+		SourceType:       srcType,
+		SourceRef:        srcRef,
+		Confidence:       conf,
+		CommunityID:      commID,
+		PageRank:         rank,
+		LastUsed:         lu,
+		CreatedAt:        ca,
+		UseCount:         useCount,
+		Salience:         salience,
+		RetrievalHistory: retrievalHistory,
 	}
 }
 
@@ -708,7 +729,8 @@ func (v *VesselGraph) FindText(ctx context.Context, query string, limit int, sho
 		CALL db.index.fulltext.queryNodes('shard_content_ft', $query)
 		YIELD node, score
 		SET node.last_used = datetime(),
-			node.use_count = coalesce(node.use_count, 0) + 1
+			node.use_count = coalesce(node.use_count, 0) + 1,
+			node.retrieval_history = (coalesce(node.retrieval_history, []) + [toString(datetime())])[-20..]
 		RETURN node
 		LIMIT $limit
 		`
@@ -808,11 +830,13 @@ func (v *VesselGraph) SearchGraph(ctx context.Context, queryVector []byte, limit
 		CALL db.index.vector.queryNodes('shard_embeddings', $topK, $vector)
 		YIELD node AS center, score
 		SET center.last_used = datetime(),
-			center.use_count = coalesce(center.use_count, 0) + 1
+			center.use_count = coalesce(center.use_count, 0) + 1,
+			center.retrieval_history = (coalesce(center.retrieval_history, []) + [toString(datetime())])[-20..]
 		WITH center
 		OPTIONAL MATCH (center)-[r:CONNECTED_TO]-(neighbor:Shard)
 		SET neighbor.last_used = datetime(),
-			neighbor.use_count = coalesce(neighbor.use_count, 0) + 1
+			neighbor.use_count = coalesce(neighbor.use_count, 0) + 1,
+			neighbor.retrieval_history = (coalesce(neighbor.retrieval_history, []) + [toString(datetime())])[-20..]
 		WITH center, neighbor, r
 		OPTIONAL MATCH (neighbor)-[nr:CONNECTED_TO]-()
 		WITH center, neighbor, r, count(nr) AS neighborDegree
@@ -982,4 +1006,28 @@ func (v *VesselGraph) Optimize(ctx context.Context) error {
 	// Neo4j handles space reclamation internally.
 	// Our Vector index is ensured on startup, but we can call it here just to be safe.
 	return v.ensureIndexes(ctx)
+}
+
+// --- Retrieval History Serialization ---
+
+// serializeRetrievalHistory converts Go timestamps to RFC3339 strings for Neo4j storage.
+func serializeRetrievalHistory(history []time.Time) []string {
+	out := make([]string, len(history))
+	for i, t := range history {
+		out[i] = t.Format(time.RFC3339)
+	}
+	return out
+}
+
+// deserializeRetrievalHistory converts Neo4j string list back to Go timestamps.
+func deserializeRetrievalHistory(raw []any) []time.Time {
+	out := make([]time.Time, 0, len(raw))
+	for _, v := range raw {
+		if s, ok := v.(string); ok {
+			if t, err := time.Parse(time.RFC3339, s); err == nil {
+				out = append(out, t)
+			}
+		}
+	}
+	return out
 }

@@ -51,6 +51,10 @@ type Shard struct {
 	CreatedAt   time.Time
 	UseCount    int
 	BondCount   int
+
+	// Cognitive Science Fields (v4.0)
+	Salience         float64     // LLM-scored importance [0.1, 1.0]; default 0.5
+	RetrievalHistory []time.Time // Rolling window of last 20 retrieval timestamps
 }
 
 // ShardBond represents a semantic link between fragments.

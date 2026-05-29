@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,14 +19,15 @@ import (
 )
 
 type MCPServer struct {
-	vessel   storage.Repository
-	mcp      *server.MCPServer
-	apiKey   string
-	embedder storage.Embedder
-	wm       *WorkingMemory
+	vessel      storage.Repository
+	mcp         *server.MCPServer
+	apiKey      string
+	embedder    storage.Embedder
+	summarizer  storage.Summarizer
+	wm          *WorkingMemory
 }
 
-func NewMCPServer(v storage.Repository, apiKey string, e storage.Embedder) *MCPServer {
+func NewMCPServer(v storage.Repository, apiKey string, e storage.Embedder, sum storage.Summarizer) *MCPServer {
 	log.Println("[MCP] Initializing Shard-Link Hub MCP Server...")
 
 	// 1. Create the base MCP server
@@ -41,11 +43,12 @@ func NewMCPServer(v storage.Repository, apiKey string, e storage.Embedder) *MCPS
 	wm.StartCleanup(context.Background())
 
 	mcpSrv := &MCPServer{
-		vessel:   v,
-		mcp:      s,
-		apiKey:   apiKey,
-		embedder: e,
-		wm:       wm,
+		vessel:     v,
+		mcp:        s,
+		apiKey:     apiKey,
+		embedder:   e,
+		summarizer: sum,
+		wm:         wm,
 	}
 
 	// 2. Register tools, resources, and prompts BEFORE return
@@ -527,16 +530,51 @@ func (s *MCPServer) handleSave(ctx context.Context, request mcp.CallToolRequest)
 		return mcp.NewToolResultError("Vector must be provided if the server cannot generate it"), nil
 	}
 
+	// Salience Scoring: Ask the LLM to rate importance [0.1, 1.0]
+	salience := 0.5 // Safe default for mock mode or parse failures
+	if s.summarizer != nil && content != "" {
+		saliencePrompt := fmt.Sprintf(
+			"Rate the long-term importance of this memory fragment on a scale from 0.1 (trivial/ephemeral) to 1.0 (critical/identity-defining). "+
+				"Respond with ONLY a decimal number, nothing else.\n\nFragment: %s", content)
+		if resp, err := s.summarizer.Summarize(ctx, saliencePrompt); err == nil {
+			resp = strings.TrimSpace(resp)
+			if parsed, err := strconv.ParseFloat(resp, 64); err == nil && parsed >= 0.1 && parsed <= 1.0 {
+				salience = parsed
+			}
+		}
+	}
+	log.Printf("[MCP] Salience scored: %.2f for shard %s", salience, id)
+
 	shard := storage.Shard{
 		ID:       id,
 		Content:  content,
 		Category: category,
 		Vector:   vec,
+		Salience: salience,
 	}
 
 	if err := s.vessel.SaveShard(ctx, shard); err != nil {
 		log.Printf("[MCP ERROR] save_memory failed: %v", err)
 		return nil, err
+	}
+
+	// Episodic Session Chain: Link shard to its MCP session Episode node
+	sessID := sessionID(ctx)
+	if sessID != "unknown" {
+		if vg, ok := s.vessel.(*storage.VesselGraph); ok {
+			episodeQuery := `
+			MERGE (e:Episode {session_id: $sessionID})
+			ON CREATE SET e.started_at = datetime(), e.shard_count = 1
+			ON MATCH SET e.shard_count = e.shard_count + 1, e.last_active = datetime()
+			WITH e
+			MATCH (sh:Shard {id: $shardID})
+			MERGE (sh)-[:EPISODE_OF]->(e)
+			`
+			_, _ = vg.ExecuteQuery(ctx, episodeQuery, map[string]any{
+				"sessionID": sessID, "shardID": id,
+			})
+			log.Printf("[MCP] Shard %s linked to episode %s", id, sessID)
+		}
 	}
 
 	return mcp.NewToolResultText(fmt.Sprintf("Memory saved: %s", id)), nil
