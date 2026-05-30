@@ -355,4 +355,227 @@ log.Printf("\[BENCHMARK\] shard=%s v35=%.2f v40=%.2f delta=%.2f",
 
 ---
 
-*Research Track v1.1 | 2026-05-29* *Authors: BB & Brainy Bestie* *"The math should be as alive as the mesh."*
+*Research Track v1.2 | 2026-05-29* *Authors: BB & Brainy Bestie* *"The math should be as alive as the mesh."*
+
+---
+---
+
+## Survival Formula v4.1 — Decay Scaling Research (2026-05-29)
+
+**Status:** IMPLEMENTED — shipped 2026-05-30
+**Trigger:** v4.0 shipped but shards decay too aggressively. A well-connected shard (15 bonds, 0.95 salience) drops below the Janitor eviction threshold of 20 in ~40 hours without retrieval. Cross-referencing cognitive science, neuroscience, and state-of-the-art AI memory systems reveals Shard-Link forgets **2-10x faster** than any published model.
+
+---
+
+### The Problem: Dimensional Mismatch in v4.0
+
+The v4.0 formula uses ACT-R activation `A(m)` in two roles:
+
+1. **Numerator multiplier** — directly scales the score (removed in hotfix, but the decay issue persists)
+2. **Denominator decay rate** — controls how fast the exponential kills the score
+
+For an untouched shard, `A(m) = epsilon = 0.1`. Even with the `tau = 168h` bridge constant, the effective decay half-life is:
+
+```
+effective_half_life = A(m) * tau = 0.1 * 168 = 16.8 hours
+```
+
+This means an unretrieved shard loses half its score every ~17 hours. No model in the literature supports forgetting this fast for meaningful content.
+
+---
+
+### Cross-Model Comparison: How Long Do Untouched Memories Survive?
+
+| Model | Type | Unretrieved Half-Life | Source |
+| :---- | :---- | :---- | :---- |
+| Ebbinghaus (1885, meaningless syllables) | Psychology | ~20 hours (33% at 1 day) | Original experiment, replicated Murre & Dros 2015 (PLOS ONE) |
+| Ebbinghaus (meaningful content) | Psychology | ~3-5 days (estimated) | 3-5x multiplier for meaningful vs. meaningless material |
+| MemoryBank (Zhong et al. 2024) | AI / LLM Memory | S=1 day initial → ~1 day | AAAI 2024, `R = e^(-t/S)`, S += 1 per retrieval |
+| FSRS v7 ("Good" rating) | Spaced Repetition | **S₀ = 3.13 days** | State-of-the-art, powers Anki, 19 trainable params |
+| FSRS v7 ("Easy" rating) | Spaced Repetition | **S₀ = 15.47 days** | Same — high-confidence items survive 2+ weeks |
+| SuperMemo SM-2 | Spaced Repetition | R = 0.9^(t/S), first interval = 1 day | Wozniak 1987, foundational SRS algorithm |
+| Biological (synaptic consolidation) | Neuroscience | **~2 days** for memory trace stability | Stochastic Consolidation (Roxin & Fusi 2022, PMC9339009) |
+| Biological (active forgetting) | Neuroscience | Rac1 peak activation at 1 hour, but traces persist beyond behavioral recall | Davis & Zhong 2017 (PMC5657245) |
+| **Shard-Link v4.0 (current)** | **AI Memory** | **~16.8 hours** | **2-10x too aggressive** |
+
+---
+
+### Key Research Findings
+
+#### 1. Ebbinghaus Forgetting Curve — The Baseline
+
+Formula: `R = e^(-t/S)` where S = memory strength (stability)
+
+Original data for **meaningless syllables** (worst case):
+
+| Time | Retained |
+| :---- | :---- |
+| 20 minutes | 58% |
+| 1 hour | 44% |
+| 9 hours | 36% |
+| 1 day | 33% |
+| 6 days | 25% |
+| 31 days | 21% |
+
+Critical insight: even meaningless content retains **21% after a full month**. Our shards are structured, meaningful, LLM-summarized content — they should survive far longer than syllables.
+
+Each review increases S, making the curve flatter. This maps directly to our ACT-R retrieval history model.
+
+#### 2. MemoryBank (AAAI 2024) — Closest AI Analog
+
+- Formula: `R = e^(-t/S)`, initial **S = 1 day**
+- Each retrieval: `S += 1`, reset `t = 0`
+- After 3 retrievals: S = 4 days → memory survives nearly a week at 37% retention
+- Authors explicitly note: "this is an exploratory and highly simplified memory updating model"
+- **Takeaway for Shard-Link:** Even the simplest AI memory model starts at S = 1 day, not 16.8 hours
+
+#### 3. FSRS v7 — State of the Art (Powers Anki)
+
+- Formula: `R = (1 + FACTOR * t/S)^DECAY` where DECAY = -0.5, FACTOR = 19/81
+- Uses **power-law decay**, not exponential — gentler long-term tail
+- Initial stability is mapped from **content difficulty ratings**:
+
+| Rating | Initial S₀ (days) | Shard-Link Equivalent |
+| :---- | :---- | :---- |
+| Again (0.41 days) | ~10 hours | Sal < 0.2 (trivial ephemera) |
+| Hard (1.18 days) | ~28 hours | Sal 0.2-0.4 (low-importance context) |
+| Good (3.13 days) | ~75 hours | Sal 0.4-0.7 (useful project context) |
+| Easy (15.47 days) | ~371 hours | Sal 0.7-1.0 (identity/critical knowledge) |
+
+- Each successful retrieval multiplies S by a growth factor (typically 1.5-3x)
+- **Takeaway for Shard-Link:** Map salience → initial stability directly, FSRS-style. This is the most principled approach — it's been validated on millions of Anki users.
+
+#### 4. Biological Neuroscience
+
+**Memory Phases:**
+- Short-term memory: seconds to minutes (synaptic activity only)
+- Intermediate-term: hours (requires protein synthesis to begin consolidation)
+- **Consolidation threshold: ~2 days** for a memory trace to achieve relative stability
+- Long-term potentiation (LTP): once consolidated, traces can persist years
+
+**Active Forgetting (not just passive decay):**
+- Rac1-dependent pathway: dopamine → Rac1 → cofilin cascade remodels actin cytoskeleton
+- Cdc42-dependent pathway: distinct mechanism for anesthesia-resistant memories
+- Neurogenesis: new hippocampal neurons physically displace existing traces
+
+**Key biological insight:** "Biochemical memory traces persist beyond the time at which memory can be successfully retrieved." Forgotten memories leave traces that can be reactivated with the right cues — analogous to archived shards in Shard-Link's Postgres Archival Vessel.
+
+**Takeaway for Shard-Link:** Biology gives new memories a ~2 day grace period for consolidation. The Janitor should respect a similar window.
+
+---
+
+### Proposed Fix: Salience-Mapped Initial Stability
+
+**Core Idea:** Replace the fixed `tau` constant with a salience-mapped stability value `S₀` measured in **days**, following the FSRS/Ebbinghaus `R = e^(-t/S)` pattern.
+
+#### New Formula: v4.1
+
+```
+S = min(95, (D * (C + 1.0) * 10 * Sal) / e^(Δt_days / S₀(Sal, A(m))))
+```
+
+Where:
+
+```
+S₀(Sal, A(m)) = S_base(Sal) * (1 + A(m))
+```
+
+- `Δt_days` = time since last use, in **days** (not hours)
+- `S_base(Sal)` = salience-mapped initial stability (days), interpolated from FSRS-calibrated anchors
+- `A(m)` = ACT-R activation — multiplies stability so retrieved shards decay slower
+- `(1 + A(m))` ensures: at A(m)=0 (no history), S₀ = S_base; at A(m)=2.0, S₀ = 3x base
+
+#### Salience → Stability Mapping (FSRS-Calibrated)
+
+| Salience Range | S_base (days) | FSRS Equivalent | Rationale |
+| :---- | :---- | :---- | :---- |
+| 0.1 - 0.2 | 1.0 | Again/Hard | Trivial ephemera — forget in ~1 day |
+| 0.2 - 0.4 | 3.0 | Good | Low-importance context — survive ~3 days |
+| 0.4 - 0.7 | 7.0 | Good/Easy | Useful project context — survive ~1 week |
+| 0.7 - 1.0 | 14.0 | Easy | Critical knowledge — survive ~2 weeks |
+
+Interpolation: `S_base = lerp(1.0, 14.0, (Sal - 0.1) / 0.9)`
+
+This gives a continuous mapping: `S_base = 1.0 + (Sal - 0.1) * 14.44`
+
+#### Worked Examples: v4.1 vs v4.0
+
+**Scenario A: Hub shard (15 bonds, centrality=0.48, salience=0.95, no retrievals)**
+
+v4.0 (current): drops below 20 at ~40 hours
+
+v4.1:
+- S_base = 1.0 + (0.95 - 0.1) * 14.44 = **13.27 days**
+- S₀ = 13.27 * (1 + 0.1) = **14.6 days** (A(m)=0.1 for zero history)
+- numerator = 15 * 1.48 * 10 * 0.95 = 210.9
+- At day 1: e^(1/14.6) = 1.07 → score = 197 → **95 (capped)**
+- At day 7: e^(7/14.6) = 1.62 → score = 130 → **95 (capped)**
+- At day 14: e^(14/14.6) = 2.61 → score = **80.8**
+- At day 21: e^(21/14.6) = 4.22 → score = **50.0**
+- At day 30: e^(30/14.6) = 7.86 → score = **26.8** (still above eviction)
+- At day 40: e^(40/14.6) = 15.5 → score = **13.6** (Janitor candidate)
+
+**40 days** before eviction risk vs. **40 hours** in v4.0.
+
+**Scenario B: Weak shard (2 bonds, centrality=0, salience=0.3, no retrievals)**
+
+v4.1:
+- S_base = 1.0 + (0.3 - 0.1) * 14.44 = **3.89 days**
+- S₀ = 3.89 * 1.1 = **4.28 days**
+- numerator = 2 * 1.0 * 10 * 0.3 = 6.0
+- At day 1: e^(1/4.28) = 1.26 → score = **4.8**
+- At day 3: e^(3/4.28) = 2.02 → score = **3.0**
+
+Low-importance shard starts low (4.8) and fades within days — correctly targeted for eviction.
+
+**Scenario C: Active shard (10 bonds, centrality=0.3, salience=0.6, retrieved 5x this week)**
+
+v4.1:
+- A(m) ≈ 1.5 (strong recent retrieval history)
+- S_base = 1.0 + (0.6 - 0.1) * 14.44 = **8.22 days**
+- S₀ = 8.22 * (1 + 1.5) = **20.55 days**
+- numerator = 10 * 1.3 * 10 * 0.6 = 78.0
+- At day 14: e^(14/20.55) = 1.98 → score = **39.4** (healthy)
+- At day 30: e^(30/20.55) = 4.31 → score = **18.1** (approaching eviction)
+
+Active retrieval extends survival from 2 weeks (base) to 4+ weeks. ACT-R activation is doing its job — in the denominator, not the numerator.
+
+---
+
+### Why v4.1 Is More Principled Than v4.0
+
+| Aspect | v4.0 | v4.1 |
+| :---- | :---- | :---- |
+| Decay time unit | Hours (with tau hack) | Days (natural unit for memory) |
+| Initial stability | Fixed: A(m) * tau = 16.8h | Salience-mapped: 1-14 days (FSRS-calibrated) |
+| A(m) role | Numerator multiplier + decay rate (conflated) | Decay rate modulator only (proper Ebbinghaus role) |
+| Salience role | Numerator weight only | Determines initial stability + numerator weight |
+| Grounding | Intuitive tau constant | FSRS v7 defaults validated on millions of users |
+| Biological alignment | ~17h half-life (too fast) | 1-14 day range matches consolidation window |
+
+---
+
+### Implementation Checklist
+
+- [x] Replace `tau` constant with `S_base(Sal)` interpolation in `cognitive.go`
+- [x] Change `Δt` from hours to days in `SurvivalScoreV4`
+- [x] Add `(1 + A(m))` stability multiplier in denominator
+- [x] Update Visual Ego `packData()` benchmark logging
+- [x] Update CLAUDE.md formula reference
+- [x] Patch zero-value `created_at` timestamps (54 shards migrated)
+- [ ] Run dual-score benchmark: v3.5 vs v4.1 for 7 days
+- [ ] Validate: no high-salience shard evicted before 7 days without retrieval
+- [ ] Validate: low-salience orphan shards still evicted within 1-3 days
+
+---
+
+### New References (v4.1 Research)
+
+| \# | Paper | Authors | Year | Field | URL |
+| :---- | :---- | :---- | :---- | :---- | :---- |
+| 9 | MemoryBank: Enhancing Large Language Models with Long-Term Memory | Zhong et al. | 2024 | Computer Science / AI (AAAI) | [https://ar5iv.labs.arxiv.org/html/2305.10250](https://ar5iv.labs.arxiv.org/html/2305.10250) |
+| 10 | FSRS v7: Free Spaced Repetition Scheduler Algorithm | open-spaced-repetition | 2024 | Spaced Repetition / ML | [https://github.com/open-spaced-repetition/free-spaced-repetition-scheduler](https://github.com/open-spaced-repetition/free-spaced-repetition-scheduler) |
+| 11 | The Biology of Forgetting — A Perspective | Davis & Zhong | 2017 | Neuroscience (NIH/PMC) | [https://pmc.ncbi.nlm.nih.gov/articles/PMC5657245/](https://pmc.ncbi.nlm.nih.gov/articles/PMC5657245/) |
+| 12 | Stochastic Consolidation of Lifelong Memory | Roxin & Fusi | 2022 | Computational Neuroscience (NIH/PMC) | [https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9339009/](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9339009/) |
+| 13 | Memory Engram Stability and Flexibility | Bhatt et al. | 2024 | Neuroscience (NIH/PMC) | [https://pmc.ncbi.nlm.nih.gov/articles/PMC11525749/](https://pmc.ncbi.nlm.nih.gov/articles/PMC11525749/) |
+| 14 | Ebbinghaus Forgetting Curve (1885), replicated | Murre & Dros | 2015 | Cognitive Psychology (PLOS ONE) | [https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0120644](https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0120644) |

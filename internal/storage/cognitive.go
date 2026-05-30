@@ -36,34 +36,57 @@ func CalculateACTRActivation(history []time.Time, decayD float64) float64 {
 	return math.Log(sum) + epsilon
 }
 
-// SurvivalScoreV4 computes the cognitive-science-backed survival score:
+// SalToStability maps salience [0.1, 1.0] to a baseline stability in days,
+// using FSRS-calibrated anchors:
 //
-//	S = min(95, (D * (C+1.0) * 10 * A(m) * Sal) / e^(dt / A(m)))
+//	Sal 0.1 → 1 day   (ephemera — forget quickly)
+//	Sal 0.5 → ~6.8 days (project context — survive ~1 week)
+//	Sal 1.0 → 14 days  (critical knowledge — survive ~2 weeks)
+//
+// Linear interpolation: S_base = 1.0 + (Sal - 0.1) * 14.44
+func SalToStability(salience float64) float64 {
+	return 1.0 + (salience-0.1)*14.44
+}
+
+// SurvivalScoreV4 computes the v4.1 cognitive-science-backed survival score:
+//
+//	S = min(95, (D * (C+1.0) * 10 * Sal) / e^(Δt_days / S₀))
+//	S₀ = S_base(Sal) * (1 + A(m))
 //
 // Where:
 //   - D = bond density (link count)
 //   - C = centrality (PageRank)
-//   - A(m) = ACT-R activation from retrieval history
 //   - Sal = LLM-scored salience [0.1, 1.0]
-//   - dt = hours since last use
+//   - S_base = salience-mapped initial stability in days (FSRS-calibrated)
+//   - A(m) = ACT-R activation — multiplies stability so retrieved shards decay slower
+//   - Δt_days = time since last use in days
 //
-// The exponential denominator models Ebbinghaus forgetting — shards with higher
-// activation decay slower because A(m) appears in the exponent's denominator.
+// v4.0 → v4.1 changes:
+//  1. Replaced fixed τ=168h with S_base(Sal) — salience now directly controls
+//     the decay window instead of only scaling the numerator.
+//  2. Time unit switched from hours to days — aligns with FSRS stability semantics.
+//  3. A(m) moved from raw multiplier (A(m) * τ) to stability extension (1 + A(m)).
+//     At A(m)=0 the shard still gets its full S_base window. Retrieval history
+//     extends it (A(m)=1.5 → 2.5× base), but can never collapse it to near-zero
+//     the way v4.0 did when clustered timestamps killed A(m).
 func SurvivalScoreV4(density int, centrality, salience float64, history []time.Time, lastUsed time.Time) float64 {
 	activation := CalculateACTRActivation(history, 0.5)
 
-	// Guard: floor activation to prevent division-by-near-zero in the exponent
-	if activation < 0.01 {
-		activation = 0.01
+	// Guard: floor activation so (1 + A(m)) >= 1.0
+	if activation < 0.0 {
+		activation = 0.0
 	}
 
-	hoursSince := time.Since(lastUsed).Hours()
-	if hoursSince < 1.0 {
-		hoursSince = 1.0
+	sBase := SalToStability(salience)
+	s0 := sBase * (1.0 + activation)
+
+	daysSince := time.Since(lastUsed).Hours() / 24.0
+	if daysSince < 1.0/24.0 {
+		daysSince = 1.0 / 24.0 // Floor at 1 hour
 	}
 
-	numerator := float64(density) * (centrality + 1.0) * 10.0 * activation * salience
-	denominator := math.Exp(hoursSince / activation)
+	numerator := float64(density) * (centrality + 1.0) * 10.0 * salience
+	denominator := math.Exp(daysSince / s0)
 
 	score := numerator / denominator
 

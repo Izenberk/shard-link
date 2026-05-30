@@ -491,16 +491,16 @@ func (s *Server) packData(shards []storage.Shard, bonds []storage.ShardBond) Viz
 			salience = 0.5
 		}
 
-		// Dual-score benchmark: v3.5 (legacy) vs v4.0 (cognitive science)
+		// Dual-score benchmark: v3.5 (legacy) vs v4.1 (FSRS-calibrated decay)
 		v35 := storage.SurvivalScoreV35(links, s.PageRank, s.UseCount, lastUsed)
-		v40 := storage.SurvivalScoreV4(links, s.PageRank, salience, s.RetrievalHistory, lastUsed)
+		v41 := storage.SurvivalScoreV4(links, s.PageRank, salience, s.RetrievalHistory, lastUsed)
 
-		survival := v40
+		survival := v41
 		if s.Category == "core" {
 			survival = 100 // Core shards are the "Gold Standard" (100)
 		}
 
-		log.Printf("[BENCHMARK] shard=%s v35=%.2f v40=%.2f delta=%.2f", s.ID, v35, v40, v40-v35)
+		log.Printf("[BENCHMARK] shard=%s v35=%.2f v41=%.2f delta=%.2f", s.ID, v35, v41, v41-v35)
 
 		data.Nodes[i] = VizNode{
 			ID:         s.ID,

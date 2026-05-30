@@ -546,11 +546,12 @@ func (s *MCPServer) handleSave(ctx context.Context, request mcp.CallToolRequest)
 	log.Printf("[MCP] Salience scored: %.2f for shard %s", salience, id)
 
 	shard := storage.Shard{
-		ID:       id,
-		Content:  content,
-		Category: category,
-		Vector:   vec,
-		Salience: salience,
+		ID:        id,
+		Content:   content,
+		Category:  category,
+		Vector:    vec,
+		Salience:  salience,
+		CreatedAt: time.Now(),
 	}
 
 	if err := s.vessel.SaveShard(ctx, shard); err != nil {

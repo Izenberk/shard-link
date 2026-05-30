@@ -133,7 +133,7 @@ func (v *VesselGraph) SaveShard(ctx context.Context, s Shard) error {
 			s.source_ref = $source_ref,
 			s.confidence = $confidence,
 			s.last_used = $last_used,
-			s.created_at = $created_at,
+			s.created_at = CASE WHEN s.created_at IS NOT NULL AND s.created_at <> '0001-01-01T00:00:00Z' THEN s.created_at ELSE $created_at END,
 			s.salience = $salience,
 			s.retrieval_history = $retrieval_history
 	`
