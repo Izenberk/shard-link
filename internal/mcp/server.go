@@ -2,7 +2,10 @@ package mcp
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -90,14 +93,21 @@ func (s *MCPServer) withAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		if r.Header.Get("X-API-Key") != s.apiKey {
+		// Accept X-API-Key (Claude Code CLI) or Authorization: Bearer (Claude.ai connectors)
+		key := r.Header.Get("X-API-Key")
+		if key == "" {
+			if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+				key = strings.TrimPrefix(auth, "Bearer ")
+			}
+		}
+
+		if key != s.apiKey {
 			log.Printf("[Auth] Denied %s %s (Key Missing/Invalid)", r.Method, r.URL.Path)
 			http.Error(w, "Unauthorized: Invalid Shard Access Key", http.StatusUnauthorized)
 			return
 		}
 
 		// Rate limiting — per API key
-		key := r.Header.Get("X-API-Key")
 		if key == "" {
 			key = r.RemoteAddr
 		}
@@ -435,6 +445,159 @@ func (s *MCPServer) handleShardPrompt(ctx context.Context, request mcp.GetPrompt
 	return mcp.NewGetPromptResult("Search Results", []mcp.PromptMessage{message}), nil
 }
 
+// --- OAuth 2.0 Authorization Code + PKCE (for Claude.ai connectors) ---
+//
+// Claude.ai uses the full Authorization Code flow with PKCE (RFC 7636):
+//   1. Browser redirects to /authorize with code_challenge (S256)
+//   2. /authorize auto-approves (single-user) and redirects back with a code
+//   3. Claude.ai POSTs to /token with code + code_verifier
+//   4. /token validates PKCE and returns a Bearer token
+//
+// The Bearer token IS the HUB_API_KEY — no separate token store needed.
+
+// authCode holds a pending authorization code with its PKCE challenge.
+type authCode struct {
+	challenge string
+	method    string
+	expiresAt time.Time
+}
+
+// pendingCodes stores authorization codes awaiting token exchange.
+// Map key is the code string. Cleaned up on use or expiry.
+var pendingCodes = struct {
+	sync.Mutex
+	codes map[string]authCode
+}{codes: make(map[string]authCode)}
+
+// handleOAuthMetadata serves OAuth 2.0 Authorization Server Metadata (RFC 8414).
+func (s *MCPServer) handleOAuthMetadata(baseURL string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("[OAuth] Metadata discovery from %s", r.RemoteAddr)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"issuer":                                baseURL,
+			"authorization_endpoint":                baseURL + "/authorize",
+			"token_endpoint":                        baseURL + "/token",
+			"grant_types_supported":                 []string{"authorization_code"},
+			"response_types_supported":              []string{"code"},
+			"code_challenge_methods_supported":       []string{"S256"},
+			"token_endpoint_auth_methods_supported": []string{"none"},
+		})
+	}
+}
+
+// handleOAuthAuthorize auto-approves the authorization request (single-user system)
+// and redirects back to Claude.ai with a one-time authorization code.
+func (s *MCPServer) handleOAuthAuthorize() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		challenge := r.URL.Query().Get("code_challenge")
+		method := r.URL.Query().Get("code_challenge_method")
+		redirectURI := r.URL.Query().Get("redirect_uri")
+		state := r.URL.Query().Get("state")
+
+		log.Printf("[OAuth] Authorize request: redirect=%s method=%s from %s", redirectURI, method, r.RemoteAddr)
+
+		if redirectURI == "" || challenge == "" {
+			http.Error(w, "Missing redirect_uri or code_challenge", http.StatusBadRequest)
+			return
+		}
+
+		// Generate a random one-time code
+		codeBytes := make([]byte, 32)
+		if _, err := rand.Read(codeBytes); err != nil {
+			http.Error(w, "Internal error", http.StatusInternalServerError)
+			return
+		}
+		code := base64.RawURLEncoding.EncodeToString(codeBytes)
+
+		// Store code with PKCE challenge (expires in 5 minutes)
+		pendingCodes.Lock()
+		pendingCodes.codes[code] = authCode{
+			challenge: challenge,
+			method:    method,
+			expiresAt: time.Now().Add(5 * time.Minute),
+		}
+		pendingCodes.Unlock()
+
+		// Redirect back to Claude.ai with the code
+		sep := "?"
+		if strings.Contains(redirectURI, "?") {
+			sep = "&"
+		}
+		location := fmt.Sprintf("%s%scode=%s&state=%s", redirectURI, sep, code, state)
+		http.Redirect(w, r, location, http.StatusFound)
+	}
+}
+
+// handleOAuthToken exchanges an authorization code + PKCE verifier for a Bearer token.
+func (s *MCPServer) handleOAuthToken() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		r.ParseForm()
+
+		grantType := r.FormValue("grant_type")
+		code := r.FormValue("code")
+		verifier := r.FormValue("code_verifier")
+
+		log.Printf("[OAuth] Token request: grant_type=%s from %s", grantType, r.RemoteAddr)
+
+		if grantType != "authorization_code" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error":             "unsupported_grant_type",
+				"error_description": "Only authorization_code is supported",
+			})
+			return
+		}
+
+		// Look up and consume the pending code
+		pendingCodes.Lock()
+		pending, exists := pendingCodes.codes[code]
+		if exists {
+			delete(pendingCodes.codes, code)
+		}
+		pendingCodes.Unlock()
+
+		if !exists || time.Now().After(pending.expiresAt) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error":             "invalid_grant",
+				"error_description": "Authorization code is invalid or expired",
+			})
+			return
+		}
+
+		// Validate PKCE: SHA256(code_verifier) must match code_challenge
+		if pending.method == "S256" && verifier != "" {
+			h := sha256.Sum256([]byte(verifier))
+			computed := base64.RawURLEncoding.EncodeToString(h[:])
+			if computed != pending.challenge {
+				log.Printf("[OAuth] PKCE verification failed")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{
+					"error":             "invalid_grant",
+					"error_description": "PKCE verification failed",
+				})
+				return
+			}
+		}
+
+		log.Printf("[OAuth] Token issued to %s", r.RemoteAddr)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"access_token": s.apiKey,
+			"token_type":   "Bearer",
+			"expires_in":   86400,
+		})
+	}
+}
+
 // StartHub ignites the multi-protocol MCP bridge.
 // Primary transport: Streamable HTTP on /mcp (MCP spec 2024-11-05).
 // Legacy transport:  Standard SSE on /sse + /message (kept for backward compat).
@@ -454,6 +617,11 @@ func (s *MCPServer) StartHub(port int, baseURL string) error {
 	)
 
 	mux := http.NewServeMux()
+
+	// OAuth 2.0 Authorization Code + PKCE — enables Claude.ai connector auth
+	mux.HandleFunc("/.well-known/oauth-authorization-server", s.handleOAuthMetadata(baseURL))
+	mux.HandleFunc("/authorize", s.handleOAuthAuthorize())
+	mux.HandleFunc("/token", s.handleOAuthToken())
 
 	// Primary route — Streamable HTTP
 	mux.Handle("/mcp", s.withAuth(streamableSrv))

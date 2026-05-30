@@ -121,7 +121,7 @@ Shard-Link communicates over the standard **Model Context Protocol (MCP)** using
 | **Streamable HTTP** | `/mcp` | Primary (recommended) | MCP 2024-11-05 |
 | **SSE** | `/sse` | Legacy (backward compat) | Deprecated |
 
-### Claude Code (Recommended)
+### Claude Code (CLI)
 
 Add Shard-Link to your user-scoped MCP configuration:
 
@@ -135,6 +135,30 @@ Verify the connection:
 ```bash
 claude mcp get shard-link
 ```
+
+### Claude.ai (Web)
+
+Shard-Link can be connected as a custom MCP connector on Claude.ai (Pro/Max/Team/Enterprise plans). The server implements OAuth 2.0 Authorization Code + PKCE for browser-based auth.
+
+1. Go to **Customize > Connectors > Add custom connector**
+2. URL: `https://hub.izenberk.com/mcp`
+3. Advanced settings:
+   - **OAuth Client ID:** `shard-link`
+   - **OAuth Client Secret:** your `HUB_API_KEY` value
+4. Click **Connect** — the server auto-approves and issues a Bearer token
+
+Once connected, toggle Shard-Link per conversation via the **"+"** button at the bottom of the chat input.
+
+### Authentication
+
+The Hub accepts two auth methods (same key for both):
+
+| Method | Header | Used by |
+|--------|--------|---------|
+| API Key | `X-API-Key: <key>` | Claude Code CLI, curl |
+| Bearer Token | `Authorization: Bearer <key>` | Claude.ai, OAuth clients |
+
+OAuth endpoints (`/.well-known/oauth-authorization-server`, `/authorize`, `/token`) bridge Claude.ai's required Authorization Code + PKCE flow to the existing `HUB_API_KEY` credential.
 
 ### Claude Code Skill (`/shard`)
 

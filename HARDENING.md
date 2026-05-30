@@ -1187,6 +1187,22 @@ Plus **Episodic Session Chains** (Idea C from COGNITIVE\_RESEARCH.md): shards sa
 
 **Benchmark validation:** Both v3.5 and v4.1 run in parallel via `[BENCHMARK]` logs in Visual Ego. Pass criteria: high-salience shards survive 7+ days without retrieval; low-salience orphans evict within 1-3 days; core shards remain at 100.
 
+- [x] **6.7 OAuth 2.0 Authorization Code + PKCE** \[Claude.ai connector support\]
+
+**What:** Added OAuth 2.0 endpoints so Claude.ai can connect to Shard-Link as a custom MCP connector. The Hub now serves three OAuth routes alongside the existing MCP transport.
+
+**How it works:** Claude.ai uses Authorization Code flow with PKCE (RFC 7636) — not client\_credentials:
+1. Browser redirects to `/authorize` with `code_challenge` (S256)
+2. Server auto-approves (single-user system) and redirects back with a one-time code
+3. Claude.ai exchanges code + `code_verifier` at `/token`
+4. Server validates PKCE, returns `HUB_API_KEY` as Bearer token
+5. All subsequent MCP requests use `Authorization: Bearer <token>`
+
+**Files changed:**
+- `internal/mcp/server.go` — Added `handleOAuthMetadata`, `handleOAuthAuthorize`, `handleOAuthToken`, `authCode` struct, `pendingCodes` store. `withAuth` middleware now accepts both `X-API-Key` and `Authorization: Bearer` headers.
+
+**Backward compatibility:** Existing `X-API-Key` auth (Claude Code CLI, curl) continues to work unchanged. OAuth is additive — only used by browser-based clients like Claude.ai.
+
 - [ ] **6.5 Kubernetes deployment** \[H2 2026 roadmap\]
 
 **What:** Transition the containerised stack into a local K8s cluster (`minikube` or `k3s`) as the Platform Engineering learning milestone.
