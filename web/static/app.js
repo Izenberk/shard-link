@@ -662,27 +662,68 @@ function initActivityFeed() {
 
     connect();
     loadPersistentLogs();
+    startLogPolling();
     initLogFilters(); // L.6
 }
+
+// Track the newest log timestamp so polling can detect new entries.
+// The Hub and Visual Ego are separate processes — Hub writes to SQLite
+// but doesn't push to SSE, so we poll /api/logs to catch Hub events.
+let lastLogTimestamp = '';
 
 async function loadPersistentLogs() {
     try {
         const resp = await fetch('/api/logs');
         if (resp.ok) {
             const history = await resp.json();
+            if (history.length > 0) {
+                lastLogTimestamp = history[0].timestamp || '';
+            }
             history.reverse().forEach(entry => addLogEntry(entry));
         }
     } catch (err) { console.error("Log hydration failed:", err); }
 }
 
-// Normalize timestamps to HH:MM:SS regardless of source format
+// Poll /api/logs every 5 seconds for new entries written by the Hub process.
+// Compares against lastLogTimestamp to only add entries we haven't seen yet.
+function startLogPolling() {
+    setInterval(async () => {
+        try {
+            const resp = await fetch('/api/logs');
+            if (!resp.ok) return;
+            const logs = await resp.json();
+            if (logs.length === 0) return;
+
+            // logs[0] is the newest (ORDER BY timestamp DESC)
+            const newestTs = logs[0].timestamp || '';
+            if (newestTs === lastLogTimestamp) return; // No new entries
+
+            // Collect only entries newer than what we've already shown
+            const newEntries = [];
+            for (const entry of logs) {
+                if ((entry.timestamp || '') <= lastLogTimestamp) break;
+                newEntries.push(entry);
+            }
+
+            // Add in chronological order (oldest first → prepend pushes newest to top)
+            newEntries.reverse().forEach(entry => addLogEntry(entry));
+            lastLogTimestamp = newestTs;
+        } catch (err) { /* silent — SSE handles connectivity status */ }
+    }, 5000);
+}
+
+// Normalize timestamps to HH:MM:SS in the browser's local timezone.
+// SQLite stores CURRENT_TIMESTAMP in UTC — we parse it into a Date object
+// which auto-converts to local time, then format back to HH:MM:SS.
 function normalizeTimestamp(ts) {
     if (!ts) return new Date().toLocaleTimeString('en-GB');
-    // Already HH:MM:SS
+    // YYYY-MM-DD HH:MM:SS (UTC from SQLite) — parse and convert to local
+    if (/^\d{4}-\d{2}-\d{2}/.test(ts)) {
+        const d = new Date(ts + 'Z'); // Append Z to signal UTC
+        if (!isNaN(d)) return d.toLocaleTimeString('en-GB');
+    }
+    // Already HH:MM:SS (from SSE, already local server time) — pass through
     if (/^\d{2}:\d{2}:\d{2}$/.test(ts)) return ts;
-    // YYYY-MM-DD HH:MM:SS — extract time portion
-    const match = ts.match(/(\d{2}:\d{2}:\d{2})/);
-    if (match) return match[1];
     return ts;
 }
 
