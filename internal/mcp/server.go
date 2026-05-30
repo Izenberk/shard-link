@@ -744,7 +744,7 @@ func (s *MCPServer) handleOAuthToken() http.HandlerFunc {
 			return
 		}
 		sessionToken := base64.RawURLEncoding.EncodeToString(tokenBytes)
-		expiry := time.Now().Add(24 * time.Hour)
+		expiry := time.Now().Add(30 * 24 * time.Hour)
 
 		s.sessionTokensMu.Lock()
 		s.sessionTokens[sessionToken] = expiry
@@ -755,7 +755,7 @@ func (s *MCPServer) handleOAuthToken() http.HandlerFunc {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"access_token": sessionToken,
 			"token_type":   "Bearer",
-			"expires_in":   86400,
+			"expires_in":   2592000,
 		})
 	}
 }
