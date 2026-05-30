@@ -712,7 +712,15 @@ function focusOnShard(id) {
     const d = data.nodes.find(n => n.id === id);
     if (d) {
         selectNode(d);
-        const transform = d3.zoomIdentity.translate(width / 2 - d.x, height / 2 - d.y).scale(1.5);
+        const scale = 1.5;
+        // Compute visible center between left controls and right sidebar
+        const controls = document.getElementById('controls');
+        const sidebar = document.getElementById('details');
+        const leftEdge = controls ? controls.offsetLeft + controls.offsetWidth : 0;
+        const rightEdge = sidebar.classList.contains('active') ? width - sidebar.offsetWidth : width;
+        const cx = (leftEdge + rightEdge) / 2;
+        const cy = height / 2;
+        const transform = d3.zoomIdentity.translate(cx - d.x * scale, cy - d.y * scale).scale(scale);
         d3.select('#viz').transition().duration(750).call(zoom.transform, transform);
     } else {
         document.getElementById('search').value = id;
