@@ -187,8 +187,8 @@ func main() {
 		fmt.Fprintf(w, "OK. Booted: %v", srv.bootTime.Format(time.RFC3339))
 	})
 
-	log.Printf("Visual Ego Live Dashboard ignited on :8081\n")
-	log.Fatal(http.ListenAndServe(":8081", nil))
+	log.Printf("Visual Ego Live Dashboard ignited on 127.0.0.1:8081\n")
+	log.Fatal(http.ListenAndServe("127.0.0.1:8081", nil))
 }
 
 func (s *Server) handleEvict(w http.ResponseWriter, r *http.Request) {

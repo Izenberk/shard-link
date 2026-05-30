@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -21,6 +23,12 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// validRedirectHosts restricts OAuth redirect_uri to trusted origins only.
+// Without this, an attacker could steal auth codes via redirect_uri=https://evil.com.
+var validRedirectHosts = map[string]bool{
+	"claude.ai": true,
+}
+
 type MCPServer struct {
 	vessel      storage.Repository
 	mcp         *server.MCPServer
@@ -28,6 +36,11 @@ type MCPServer struct {
 	embedder    storage.Embedder
 	summarizer  storage.Summarizer
 	wm          *WorkingMemory
+
+	// Ephemeral session tokens — OAuth clients get these instead of the raw API key.
+	// Key: token string, Value: expiry time.
+	sessionTokens   map[string]time.Time
+	sessionTokensMu sync.RWMutex
 }
 
 func NewMCPServer(v storage.Repository, apiKey string, e storage.Embedder, sum storage.Summarizer) *MCPServer {
@@ -46,12 +59,13 @@ func NewMCPServer(v storage.Repository, apiKey string, e storage.Embedder, sum s
 	wm.StartCleanup(context.Background())
 
 	mcpSrv := &MCPServer{
-		vessel:     v,
-		mcp:        s,
-		apiKey:     apiKey,
-		embedder:   e,
-		summarizer: sum,
-		wm:         wm,
+		vessel:        v,
+		mcp:           s,
+		apiKey:        apiKey,
+		embedder:      e,
+		summarizer:    sum,
+		wm:            wm,
+		sessionTokens: make(map[string]time.Time),
 	}
 
 	// 2. Register tools, resources, and prompts BEFORE return
@@ -81,9 +95,43 @@ func getLimiter(key string) *rate.Limiter {
 	return lim
 }
 
+// OAuth-specific rate limiting — per IP, 5 req/sec with burst of 3.
+// Separate from the MCP data-path limiter because OAuth endpoints are
+// unauthenticated (they establish auth), so they need tighter controls.
+var (
+	oauthLimiters   = make(map[string]*rate.Limiter)
+	oauthLimitersMu sync.Mutex
+)
+
+func getOAuthLimiter(ip string) *rate.Limiter {
+	oauthLimitersMu.Lock()
+	defer oauthLimitersMu.Unlock()
+	if lim, ok := oauthLimiters[ip]; ok {
+		return lim
+	}
+	lim := rate.NewLimiter(rate.Limit(5), 3)
+	oauthLimiters[ip] = lim
+	return lim
+}
+
+// setSecurityHeaders adds standard security headers to all OAuth responses.
+// - no-store: prevents proxies/browsers from caching tokens or codes
+// - nosniff: prevents MIME type confusion attacks
+// - DENY: prevents the OAuth pages from being framed (clickjacking)
+// - HSTS: enforces HTTPS for all future requests (Cloudflare Tunnel is TLS-only)
+func setSecurityHeaders(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("Strict-Transport-Security", "max-age=31536000")
+}
+
+// maxPendingCodes caps the number of outstanding authorization codes.
+// Beyond this limit, /authorize returns 503 to prevent memory exhaustion DoS.
+const maxPendingCodes = 100
+
 func (s *MCPServer) withAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Log all incoming requests to debug session/auth issues
 		sessID := r.URL.Query().Get("sessionId")
 		log.Printf("[MCP-HTTP] %s %s (SessID: %s) from %s", r.Method, r.URL.Path, sessID, r.RemoteAddr)
 
@@ -101,17 +149,30 @@ func (s *MCPServer) withAuth(next http.Handler) http.Handler {
 			}
 		}
 
-		if key != s.apiKey {
-			log.Printf("[Auth] Denied %s %s (Key Missing/Invalid)", r.Method, r.URL.Path)
+		// Check direct API key match first (Claude Code CLI path)
+		authorized := key == s.apiKey
+
+		// If not a direct API key match, check ephemeral session tokens (OAuth path)
+		if !authorized && key != "" {
+			s.sessionTokensMu.RLock()
+			if expiry, ok := s.sessionTokens[key]; ok && time.Now().Before(expiry) {
+				authorized = true
+			}
+			s.sessionTokensMu.RUnlock()
+		}
+
+		if !authorized {
+			log.Printf("[Auth] Denied %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
 			http.Error(w, "Unauthorized: Invalid Shard Access Key", http.StatusUnauthorized)
 			return
 		}
 
-		// Rate limiting — per API key
-		if key == "" {
-			key = r.RemoteAddr
+		// Rate limiting — per key identity
+		limiterKey := key
+		if limiterKey == "" {
+			limiterKey = r.RemoteAddr
 		}
-		if !getLimiter(key).Allow() {
+		if !getLimiter(limiterKey).Allow() {
 			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
 			return
 		}
@@ -170,9 +231,18 @@ func (s *MCPServer) RegisterTools() {
 }
 
 func (s *MCPServer) handleSearchAll(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	log.Printf("[MCP] Calling Tool: search_all (%v)", request.Params.Arguments)
 	query := request.GetString("query", "")
 	limit := int(request.GetFloat("limit", 5))
+
+	log.Printf("[MCP] Calling Tool: search_all (query_len=%d, limit=%d)", len(query), limit)
+
+	// 2.3 — Query length + limit validation
+	if len(query) > maxQueryLen {
+		return mcp.NewToolResultError(fmt.Sprintf("Query exceeds max length of %d characters", maxQueryLen)), nil
+	}
+	if limit > maxResultLimit {
+		limit = maxResultLimit
+	}
 
 	if query == "" {
 		return mcp.NewToolResultError("Query must be provided"), nil
@@ -270,10 +340,19 @@ func (s *MCPServer) handleSearchAll(ctx context.Context, request mcp.CallToolReq
 }
 
 func (s *MCPServer) handleSearchGraph(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	log.Printf("[MCP] Calling Tool: search_graph (%v)", request.Params.Arguments)
 	vecStr := request.GetString("query_vector", "")
 	text := request.GetString("query_text", "")
 	limit := int(request.GetFloat("limit", 10))
+
+	log.Printf("[MCP] Calling Tool: search_graph (text_len=%d, limit=%d)", len(text), limit)
+
+	// 2.3 — Limit validation
+	if len(text) > maxQueryLen {
+		return mcp.NewToolResultError(fmt.Sprintf("Query exceeds max length of %d characters", maxQueryLen)), nil
+	}
+	if limit > maxResultLimit {
+		limit = maxResultLimit
+	}
 
 	var queryVec []byte
 	var err error
@@ -348,10 +427,19 @@ func (s *MCPServer) handleReadCore(ctx context.Context, request mcp.ReadResource
 }
 
 func (s *MCPServer) handleSearch(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	log.Printf("[MCP] Calling Tool: search_memory (%v)", request.Params.Arguments)
 	vecStr := request.GetString("query_vector", "")
 	text := request.GetString("query_text", "")
 	limit := int(request.GetFloat("limit", 5))
+
+	log.Printf("[MCP] Calling Tool: search_memory (text_len=%d, limit=%d)", len(text), limit)
+
+	// 2.3 — Limit validation
+	if len(text) > maxQueryLen {
+		return mcp.NewToolResultError(fmt.Sprintf("Query exceeds max length of %d characters", maxQueryLen)), nil
+	}
+	if limit > maxResultLimit {
+		limit = maxResultLimit
+	}
 
 	var queryVec []byte
 	var err error
@@ -400,9 +488,18 @@ func (s *MCPServer) handleSearch(ctx context.Context, request mcp.CallToolReques
 }
 
 func (s *MCPServer) handleSearchText(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	log.Printf("[MCP] Calling Tool: search_text (%v)", request.Params.Arguments)
 	query := request.GetString("query", "")
 	limit := int(request.GetFloat("limit", 5))
+
+	log.Printf("[MCP] Calling Tool: search_text (query_len=%d, limit=%d)", len(query), limit)
+
+	// 2.3 — Limit validation
+	if len(query) > maxQueryLen {
+		return mcp.NewToolResultError(fmt.Sprintf("Query exceeds max length of %d characters", maxQueryLen)), nil
+	}
+	if limit > maxResultLimit {
+		limit = maxResultLimit
+	}
 
 	results, err := s.vessel.FindText(ctx, query, limit, true)
 	if err != nil {
@@ -436,7 +533,7 @@ func (s *MCPServer) RegisterPrompts() {
 
 func (s *MCPServer) handleShardPrompt(ctx context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 	query := request.Params.Arguments["query"]
-	log.Printf("[MCP] Handling Prompt Request: hub_search (query: %s)", query)
+	log.Printf("[MCP] Handling Prompt Request: hub_search (query_len=%d)", len(query))
 	
 	message := mcp.NewPromptMessage(mcp.RoleUser, mcp.NewTextContent(
 		fmt.Sprintf("Please use the 'search_all' tool to find all relevant shards and graph relationships for the topic: '%s'. Provide a high-signal summary of what you find.", query),
@@ -472,6 +569,7 @@ var pendingCodes = struct {
 // handleOAuthMetadata serves OAuth 2.0 Authorization Server Metadata (RFC 8414).
 func (s *MCPServer) handleOAuthMetadata(baseURL string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		setSecurityHeaders(w)
 		log.Printf("[OAuth] Metadata discovery from %s", r.RemoteAddr)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -490,28 +588,58 @@ func (s *MCPServer) handleOAuthMetadata(baseURL string) http.HandlerFunc {
 // and redirects back to Claude.ai with a one-time authorization code.
 func (s *MCPServer) handleOAuthAuthorize() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		setSecurityHeaders(w)
+
+		// Rate limit: per-IP, 5 req/sec burst 3
+		if !getOAuthLimiter(r.RemoteAddr).Allow() {
+			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+			return
+		}
+
 		challenge := r.URL.Query().Get("code_challenge")
 		method := r.URL.Query().Get("code_challenge_method")
 		redirectURI := r.URL.Query().Get("redirect_uri")
 		state := r.URL.Query().Get("state")
 
-		log.Printf("[OAuth] Authorize request: redirect=%s method=%s from %s", redirectURI, method, r.RemoteAddr)
+		log.Printf("[OAuth] Authorize request: method=%s from %s", method, r.RemoteAddr)
 
 		if redirectURI == "" || challenge == "" {
 			http.Error(w, "Missing redirect_uri or code_challenge", http.StatusBadRequest)
 			return
 		}
 
+		// 1.1 — Whitelist redirect_uri to prevent open redirect → token theft.
+		// Only HTTPS to trusted hosts is allowed.
+		parsed, err := url.Parse(redirectURI)
+		if err != nil || parsed.Scheme != "https" || !validRedirectHosts[parsed.Hostname()] {
+			log.Printf("[OAuth] Rejected redirect_uri: %s", redirectURI)
+			http.Error(w, "Invalid redirect_uri: host not in allowlist", http.StatusBadRequest)
+			return
+		}
+
+		// 1.4 — Require S256 PKCE method. Reject plain or missing method.
+		if method != "S256" {
+			http.Error(w, "code_challenge_method must be S256", http.StatusBadRequest)
+			return
+		}
+
+		// Cap pending codes to prevent memory exhaustion DoS
+		pendingCodes.Lock()
+		if len(pendingCodes.codes) >= maxPendingCodes {
+			pendingCodes.Unlock()
+			http.Error(w, "Too many pending authorizations, try again later", http.StatusServiceUnavailable)
+			return
+		}
+
 		// Generate a random one-time code
 		codeBytes := make([]byte, 32)
 		if _, err := rand.Read(codeBytes); err != nil {
+			pendingCodes.Unlock()
 			http.Error(w, "Internal error", http.StatusInternalServerError)
 			return
 		}
 		code := base64.RawURLEncoding.EncodeToString(codeBytes)
 
-		// Store code with PKCE challenge (expires in 5 minutes)
-		pendingCodes.Lock()
 		pendingCodes.codes[code] = authCode{
 			challenge: challenge,
 			method:    method,
@@ -519,19 +647,28 @@ func (s *MCPServer) handleOAuthAuthorize() http.HandlerFunc {
 		}
 		pendingCodes.Unlock()
 
-		// Redirect back to Claude.ai with the code
+		// 1.5 — URL-encode code and state to prevent parameter injection
 		sep := "?"
 		if strings.Contains(redirectURI, "?") {
 			sep = "&"
 		}
-		location := fmt.Sprintf("%s%scode=%s&state=%s", redirectURI, sep, code, state)
+		location := fmt.Sprintf("%s%scode=%s&state=%s", redirectURI, sep,
+			url.QueryEscape(code), url.QueryEscape(state))
 		http.Redirect(w, r, location, http.StatusFound)
 	}
 }
 
-// handleOAuthToken exchanges an authorization code + PKCE verifier for a Bearer token.
+// handleOAuthToken exchanges an authorization code + PKCE verifier for an ephemeral Bearer token.
 func (s *MCPServer) handleOAuthToken() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		setSecurityHeaders(w)
+
+		// Rate limit: per-IP, 5 req/sec burst 3
+		if !getOAuthLimiter(r.RemoteAddr).Allow() {
+			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+			return
+		}
+
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -554,7 +691,18 @@ func (s *MCPServer) handleOAuthToken() http.HandlerFunc {
 			return
 		}
 
-		// Look up and consume the pending code
+		// 1.4 — PKCE is mandatory. Reject if code_verifier is missing.
+		if verifier == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error":             "invalid_request",
+				"error_description": "code_verifier is required",
+			})
+			return
+		}
+
+		// Look up and consume the pending code (one-time use)
 		pendingCodes.Lock()
 		pending, exists := pendingCodes.codes[code]
 		if exists {
@@ -572,26 +720,40 @@ func (s *MCPServer) handleOAuthToken() http.HandlerFunc {
 			return
 		}
 
-		// Validate PKCE: SHA256(code_verifier) must match code_challenge
-		if pending.method == "S256" && verifier != "" {
-			h := sha256.Sum256([]byte(verifier))
-			computed := base64.RawURLEncoding.EncodeToString(h[:])
-			if computed != pending.challenge {
-				log.Printf("[OAuth] PKCE verification failed")
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(map[string]string{
-					"error":             "invalid_grant",
-					"error_description": "PKCE verification failed",
-				})
-				return
-			}
+		// 1.3 — Validate PKCE with constant-time comparison to prevent timing attacks.
+		// String == short-circuits on the first differing byte, leaking how many
+		// leading bytes matched. subtle.ConstantTimeCompare always takes the same time.
+		h := sha256.Sum256([]byte(verifier))
+		computed := base64.RawURLEncoding.EncodeToString(h[:])
+		if subtle.ConstantTimeCompare([]byte(computed), []byte(pending.challenge)) != 1 {
+			log.Printf("[OAuth] PKCE verification failed from %s", r.RemoteAddr)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error":             "invalid_grant",
+				"error_description": "PKCE verification failed",
+			})
+			return
 		}
 
-		log.Printf("[OAuth] Token issued to %s", r.RemoteAddr)
+		// 1.2 — Generate an ephemeral session token instead of returning the raw API key.
+		// If this token leaks, only this 24hr session is compromised — not the master key.
+		tokenBytes := make([]byte, 32)
+		if _, err := rand.Read(tokenBytes); err != nil {
+			http.Error(w, "Internal error", http.StatusInternalServerError)
+			return
+		}
+		sessionToken := base64.RawURLEncoding.EncodeToString(tokenBytes)
+		expiry := time.Now().Add(24 * time.Hour)
+
+		s.sessionTokensMu.Lock()
+		s.sessionTokens[sessionToken] = expiry
+		s.sessionTokensMu.Unlock()
+
+		log.Printf("[OAuth] Ephemeral token issued to %s (expires: %s)", r.RemoteAddr, expiry.Format(time.RFC3339))
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"access_token": s.apiKey,
+			"access_token": sessionToken,
 			"token_type":   "Bearer",
 			"expires_in":   86400,
 		})
@@ -603,6 +765,34 @@ func (s *MCPServer) handleOAuthToken() http.HandlerFunc {
 // Legacy transport:  Standard SSE on /sse + /message (kept for backward compat).
 func (s *MCPServer) StartHub(port int, baseURL string) error {
 	log.Printf("[MCP] Starting Hub on :%d | Streamable-HTTP → /mcp | SSE → /sse (baseURL: %s)", port, baseURL)
+
+	// 1.6 — Background cleanup: purge expired auth codes and session tokens every minute.
+	// Without this, expired entries accumulate forever (memory leak under sustained use).
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			now := time.Now()
+
+			// Clean expired pending authorization codes
+			pendingCodes.Lock()
+			for code, ac := range pendingCodes.codes {
+				if now.After(ac.expiresAt) {
+					delete(pendingCodes.codes, code)
+				}
+			}
+			pendingCodes.Unlock()
+
+			// Clean expired session tokens
+			s.sessionTokensMu.Lock()
+			for token, expiry := range s.sessionTokens {
+				if now.After(expiry) {
+					delete(s.sessionTokens, token)
+				}
+			}
+			s.sessionTokensMu.Unlock()
+		}
+	}()
 
 	// 1. Primary: Streamable HTTP transport (MCP spec 2024-11-05)
 	streamableSrv := server.NewStreamableHTTPServer(s.mcp,
@@ -673,12 +863,49 @@ func (s *MCPServer) updateCentroidSlice(ctx context.Context, shards []storage.Sh
 	s.wm.Update(sessionID(ctx), shards)
 }
 
+// allowedCategories restricts which categories MCP callers can assign.
+// "core" is excluded — core shards are identity anchors that bypass eviction,
+// so they must only be created via admin/manual operations.
+var allowedCategories = map[string]bool{
+	"memory":  true,
+	"session": true,
+	"tech":    true,
+	"arch":    true,
+}
+
+// Input size limits — prevents abuse via oversized payloads that would
+// trigger expensive embedding API calls and bloat storage.
+const (
+	maxIDLen       = 256
+	maxContentLen  = 100 * 1024 // 100KB
+	maxCategoryLen = 50
+	maxQueryLen    = 10_000
+	maxResultLimit = 100
+)
+
 func (s *MCPServer) handleSave(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	log.Printf("[MCP] Calling Tool: save_memory (%v)", request.Params.Arguments)
 	id := request.GetString("id", "")
 	content := request.GetString("content", "")
 	category := request.GetString("category", "memory")
 	vecStr := request.GetString("vector", "")
+
+	log.Printf("[MCP] Calling Tool: save_memory (id=%s, content_len=%d, category=%s)", id, len(content), category)
+
+	// 2.1 — Category whitelist: reject "core" from MCP callers
+	if !allowedCategories[category] {
+		return mcp.NewToolResultError(fmt.Sprintf("Category %q is not allowed via MCP. Allowed: memory, session, tech, arch", category)), nil
+	}
+
+	// 2.2 — Content size limits
+	if len(id) > maxIDLen {
+		return mcp.NewToolResultError(fmt.Sprintf("ID exceeds max length of %d characters", maxIDLen)), nil
+	}
+	if len(content) > maxContentLen {
+		return mcp.NewToolResultError(fmt.Sprintf("Content exceeds max size of %dKB", maxContentLen/1024)), nil
+	}
+	if len(category) > maxCategoryLen {
+		return mcp.NewToolResultError(fmt.Sprintf("Category exceeds max length of %d characters", maxCategoryLen)), nil
+	}
 
 	var vec []byte
 	var err error
