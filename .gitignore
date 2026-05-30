@@ -47,3 +47,9 @@ neo4j_records.json
 
 # Legacy Gemini CLI config (migrated to .claude/)
 .gemini/
+
+# Internal development docs (not for public repo)
+HARDENING.md
+COGNITIVE_RESEARCH.md
+FRONTEND_UPGRADES.md
+DEPENDENCY_MATRIX.md

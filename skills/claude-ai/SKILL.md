@@ -67,7 +67,7 @@ After saving, confirm what was stored and the shard ID.
 
 1. Go to **claude.ai** > Profile > **Customize** > **Connectors**
 2. Click **"+"** > **"Add custom connector"**
-3. Enter your MCP server URL (e.g., `https://hub.izenberk.com/mcp`)
+3. Enter your MCP server URL (e.g., `https://your-hub.example.com/mcp`)
 4. Click **"Advanced settings"**:
    - **OAuth Client ID:** `shard-link`
    - **OAuth Client Secret:** your `HUB_API_KEY` value

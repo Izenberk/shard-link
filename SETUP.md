@@ -59,7 +59,7 @@ All database ports are bound to `127.0.0.1` (localhost only) by default:
 
 ### Option A: Secure Online (Default)
 
-Exposes the Hub via an encrypted **Cloudflare Tunnel** — no router port forwarding required. Remote AI agents connect through your custom domain (e.g., `hub.izenberk.com`).
+Exposes the Hub via an encrypted **Cloudflare Tunnel** — no router port forwarding required. Remote AI agents connect through your custom domain (e.g., `your-hub.example.com`).
 
 ```bash
 # Ensure CLOUDFLARE_TUNNEL_TOKEN is in your .env
@@ -155,7 +155,7 @@ The `"core"` category is **blocked** from MCP callers — core shards can only b
 Add Shard-Link to your user-scoped MCP configuration:
 
 ```bash
-claude mcp add --transport http shard-link https://hub.izenberk.com/mcp \
+claude mcp add --transport http shard-link https://your-hub.example.com/mcp \
   --header "X-API-Key: YOUR_HUB_API_KEY_HERE" \
   --scope user
 ```
@@ -170,7 +170,7 @@ claude mcp get shard-link
 Shard-Link connects as a custom MCP connector on Claude.ai (Pro/Max/Team/Enterprise plans):
 
 1. Go to **Customize > Connectors > Add custom connector**
-2. URL: `https://hub.izenberk.com/mcp`
+2. URL: `https://your-hub.example.com/mcp`
 3. Advanced settings:
    - **OAuth Client ID:** `shard-link`
    - **OAuth Client Secret:** your `HUB_API_KEY` value
@@ -212,7 +212,7 @@ After deployment, verify the security hardening:
 
 | Test | Command / Action | Expected |
 |------|-----------------|----------|
-| OAuth redirect blocked | `curl "https://hub.izenberk.com/authorize?redirect_uri=https://evil.com&code_challenge=test&code_challenge_method=S256"` | 400 — host not in allowlist |
+| OAuth redirect blocked | `curl "https://your-hub.example.com/authorize?redirect_uri=https://evil.com&code_challenge=test&code_challenge_method=S256"` | 400 — host not in allowlist |
 | PKCE required | POST `/token` without `code_verifier` | 400 — code_verifier is required |
 | Category blocked | `save_memory` with `category=core` | Error — category not allowed |
 | Content limit | `save_memory` with 200KB content | Error — exceeds 100KB |

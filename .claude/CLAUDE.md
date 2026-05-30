@@ -12,7 +12,7 @@ Shard-Link is a high-performance context engine providing "long-term memory" for
 - **Backend:** Go (Golang) — strict SOLID & production standards
 - **Knowledge Mesh:** Neo4j 5.x + GDS + APOC
 - **Archival Storage:** PostgreSQL + pgvector + JSONB metadata
-- **Protocol:** MCP via Streamable HTTP (hub.izenberk.com/mcp)
+- **Protocol:** MCP via Streamable HTTP (see .env PUBLIC_URL)
 - **Infra:** Docker Compose, Cloudflare Tunnel
 
 ## Vector Precision Rules

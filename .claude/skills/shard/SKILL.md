@@ -13,9 +13,9 @@ Execute shard operation: **$ARGUMENTS**
 ## Context
 
 This is the Shard-Link project workspace. You have access to:
-- **Remote MCP Hub:** `https://hub.izenberk.com/sse` (via Cloudflare tunnel)
+- **Remote MCP Hub:** Via Cloudflare tunnel (see .env PUBLIC_URL)
 - **Local MCP endpoint:** `http://localhost:8080/sse` (direct Docker access)
-- **Neo4j Browser:** `http://localhost:7474` (neo4j/shardpass)
+- **Neo4j Browser:** `http://localhost:7474` (credentials in .env)
 - **Source code:** `internal/mcp/server.go`
 - **Infrastructure:** Docker Compose stack
 

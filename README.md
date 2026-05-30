@@ -27,8 +27,7 @@ docker compose up -d --build
 ## 4. Documentation
 - **[Setup & Deployment Guide (SETUP.md)](./SETUP.md):** Configuration, deployment modes, authentication, and client integration.
 - **[Technical Whitepaper (WHITEPAPER.md)](./WHITEPAPER.md):** Architectural deep-dive into the Knowledge Mesh and mathematical models.
-- **[Implementation Roadmap (PLAN.md)](./PLAN.md):** Phase-by-phase development progress.
-- **[Core Context (GEMINI.md)](./GEMINI.md):** Foundational mandates for AI agent integration.
+- **[Claude.ai Skill (skills/claude-ai/SKILL.md)](./skills/claude-ai/SKILL.md):** MCP connector setup and usage guide for Claude.ai integration.
 
 ## 5. Domain Language & Core Concepts
 - **Shards:** Atomic contextual fragments (768-D vectors).
