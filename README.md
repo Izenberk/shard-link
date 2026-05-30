@@ -61,7 +61,7 @@ docker compose --profile local up -d --build
 - **Knowledge Mesh:** A relational graph where shards are nodes and semantic similarities are edges.
 - **Autonomous Memory (Phase 11):** Proactive link creation and mesh maintenance.
 - **Community Summaries (GraphRAG):** LLM-generated paragraph-level summaries of shard clusters, enabling multi-resolution retrieval (micro = shard, macro = community).
-- **The Janitor:** Background process for size management using the **Survival Formula (v4.0)**.
+- **The Janitor:** Background process for size management using the **Survival Formula (v4.1)**.
 - **The Synthesizer:** Background service that autonomously bonds resonant shards, recalculates communities (Louvain), and generates community summaries via Gemini.
 - **Salience:** LLM-scored importance weight [0.1, 1.0] assigned at save time — trivial shards decay faster.
 - **Episodic Sessions:** Shards saved in the same MCP session are linked to `Episode` nodes for temporal narrative recall.
@@ -73,10 +73,10 @@ The system calculates a "Probability of Retention" for every shard:
 2. **Vital Memory (90-95):** Frequently used or highly connected "Knowledge Hubs."
 3. **Transient Memory (<20):** Candidates for automated eviction (orphans or old data).
 
-Formula (v4.0): `S = min(95, (D * (C+1) * 10 * A(m) * Sal) / e^(Δt / A(m)))`
-- **A(m)** = ACT-R activation from retrieval history — weighs *when* retrievals happened, not just how many (replaces raw use count)
+Formula (v4.1): `S = min(95, (D * (C+1) * 10 * Sal) / e^(Δt_days / S₀))` where `S₀ = S_base(Sal) * (1 + A(m))`
+- **S_base(Sal)** = FSRS-calibrated stability in days (0.1→1d, 0.5→~7d, 1.0→14d) — salience directly controls decay window
+- **A(m)** = ACT-R activation from retrieval history — extends stability via `(1 + A(m))`, can never collapse it
 - **Sal** = LLM-scored salience [0.1, 1.0] — trivial shards decay faster than critical ones
-- **e^(Δt/A(m))** = Ebbinghaus exponential decay — steep drop early, flattening for long-term survivors
 
 ## 6. Development Philosophy
 - **Active Learning:** Scaffolding provided by Gemini; core logic implemented by Izenberk.
@@ -191,4 +191,4 @@ The Synthesizer generates macro-level context for shard clusters using LLM summa
 **Fault isolation:** Summarization runs in a detached goroutine with a separate 5-minute timeout. Gemini API failures are logged and skipped — the MCP server is never affected. Rate limiting (2s between calls) respects the Gemini free tier (15 RPM).
 
 ---
-*Status: PHASE 6.6 COMPLETE (Cognitive Science Formula v4.0 + Episodic Sessions) | Transport: Streamable HTTP (MCP 2024-11-05) | Date: 2026-05-29*
+*Status: PHASE 6.6 COMPLETE (Cognitive Science Formula v4.1 + Episodic Sessions) | Transport: Streamable HTTP (MCP 2024-11-05) | Date: 2026-05-30*

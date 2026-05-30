@@ -41,15 +41,17 @@ Shard-Link utilizes a multi-database approach to balance intelligence, stability
 ## 4. Autonomous Memory Management
 A finite context window requires a sophisticated eviction strategy. Shard-Link employs **The Janitor**, a background process that utilizes a mathematical survival model grounded in published cognitive science research.
 
-### 4.1 The Survival Formula (v4.0)
+### 4.1 The Survival Formula (v4.1)
 Each shard is assigned a **Survival Score (0-100)**:
-$$S = \min\left(95, \frac{D \cdot (C + 1.0) \cdot 10 \cdot A(m) \cdot Sal}{e^{\Delta t / A(m)}}\right)$$
+$$S = \min\left(95, \frac{D \cdot (C + 1.0) \cdot 10 \cdot Sal}{e^{\Delta t_{days} / S_0}}\right)$$
+$$S_0 = S_{base}(Sal) \cdot (1 + A(m))$$
 Where:
 - **D (Neural Density):** Number of active semantic bonds.
 - **C (Relational Centrality):** PageRank score.
-- **A(m) (ACT-R Activation):** Memory activation computed from retrieval history (replaces raw use count — see 4.2).
 - **Sal (Salience):** LLM-scored importance weight in `[0.1, 1.0]` (see 4.3).
-- **e^(Dt/A(m)) (Ebbinghaus Decay):** Exponential forgetting curve — steep drop early, flattening for long-term survivors. High-activation shards decay slower because A(m) appears in the exponent's denominator.
+- **S_base(Sal) (FSRS-Calibrated Stability):** Maps salience to baseline stability in days — `S_base = 1.0 + (Sal - 0.1) * 14.44`. Ranges from 1 day (ephemera) to 14 days (critical knowledge).
+- **A(m) (ACT-R Activation):** Memory activation from retrieval history (see 4.2). Extends stability via `(1 + A(m))` — at A(m)=0, the shard gets its full S_base window; retrieval history extends it but can never collapse it.
+- **Δt_days:** Time since last use in days.
 
 **Note:** Core shards are manually set to `S = 100`, making them functionally immortal. Any shard with a score **below 20** is considered "transient" and becomes a primary candidate for eviction by The Janitor.
 
