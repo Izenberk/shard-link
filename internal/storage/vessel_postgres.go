@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -325,32 +327,70 @@ func (v *PostgresVessel) GetCount(ctx context.Context) (int, error) {
 	return count, err
 }
 
+// GetEvictionCandidates identifies low-survival shards using the Survival Formula v4.1.
+// SQL handles hard exclusions (core protection).
+// Go handles ranking: compute SurvivalScoreV4 for each candidate, sort ascending, return lowest N.
 func (v *PostgresVessel) GetEvictionCandidates(ctx context.Context, limit int) ([]string, error) {
+	// Fetch all non-core candidates with bond counts and last_used.
+	// Postgres doesn't run GDS (no PageRank), doesn't store retrieval_history or salience.
 	const query = `
-		SELECT s.id FROM shards s
+		SELECT s.id, s.last_used,
+		       COALESCE(b.link_count, 0) as bond_count
+		FROM shards s
 		LEFT JOIN (
 			SELECT from_id, COUNT(*) as link_count FROM shard_bonds GROUP BY from_id
 		) b ON s.id = b.from_id
-		WHERE s.category != 'core'
-		ORDER BY 
-			(COALESCE(b.link_count, 0) + 1) / (EXTRACT(EPOCH FROM (NOW() - s.last_used)) + 1) ASC
-		LIMIT $1;
+		WHERE s.category != 'core';
 	`
-	rows, err := v.pool.Query(ctx, query, limit)
+	rows, err := v.pool.Query(ctx, query)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var ids []string
+	type scoredCandidate struct {
+		id    string
+		score float64
+	}
+	var candidates []scoredCandidate
+
 	for rows.Next() {
 		var id string
-		if err := rows.Scan(&id); err != nil {
+		var lastUsed time.Time
+		var bondCount int
+
+		if err := rows.Scan(&id, &lastUsed, &bondCount); err != nil {
 			return nil, err
 		}
-		ids = append(ids, id)
+
+		// Postgres defaults: no PageRank (centrality=0), no salience (0.5), no retrieval_history (empty).
+		centrality := 0.0
+		salience := 0.5
+		var retrievalHistory []time.Time
+
+		score := SurvivalScoreV4(bondCount, centrality, salience, retrievalHistory, lastUsed)
+		candidates = append(candidates, scoredCandidate{id: id, score: score})
+
+		log.Printf("[Janitor] Candidate %s — survival=%.2f (bonds=%d, salience=%.2f)",
+			id, score, bondCount, salience)
 	}
-	return ids, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Sort ascending — lowest survival scores get evicted first
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].score < candidates[j].score
+	})
+
+	if limit > len(candidates) {
+		limit = len(candidates)
+	}
+	ids := make([]string, limit)
+	for i := 0; i < limit; i++ {
+		ids[i] = candidates[i].id
+	}
+	return ids, nil
 }
 
 func (v *PostgresVessel) SaveBond(ctx context.Context, b ShardBond) error {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -246,96 +247,67 @@ func (v *VesselGraph) ReinforceShards(ctx context.Context, ids []string) error {
 }
 
 
-// GetEvictionCandidates identifies "Orphan" shards (low centrality/links) using PageRank
+// GetEvictionCandidates identifies low-survival shards using the Survival Formula v4.1.
+// Cypher handles hard exclusions (core protection, resonance filter).
+// Go handles ranking: compute SurvivalScoreV4 for each candidate, sort ascending, return lowest N.
 func (v *VesselGraph) GetEvictionCandidates(ctx context.Context, limit int) ([]string, error) {
 	threshold := os.Getenv("JANITOR_RESONANCE_THRESHOLD")
 	if threshold == "" {
 		threshold = "0.70"
 	}
 
-	// 1. Try PageRank via GDS + Core Resonance protection
-	const projectionQuery = `
-	CALL gds.graph.project('janitorGraph', 'Shard', 'CONNECTED_TO', {
-		relationshipProperties: 'weight'
-	}) YIELD graphName
-	`
-	const pageRankQuery = `
+	// Fetch all non-core shards that fail the resonance-to-core protection filter.
+	// No ordering or limit in Cypher — Go handles ranking via SurvivalScoreV4.
+	candidateQuery := `
 	MATCH (core:Shard {category: 'core'})
 	MATCH (s:Shard) WHERE s.category <> 'core'
 	WITH s, core, gds.similarity.cosine(s.embedding, core.embedding) as sim
 	WITH s, max(sim) as maxResonance
 	WHERE maxResonance < parseFloat($threshold)
-	
-	CALL gds.pageRank.stream('janitorGraph', {
-		relationshipWeightProperty: 'weight'
-	})
-	YIELD nodeId, score
-	WHERE gds.util.asNode(nodeId).id = s.id
-	
-	RETURN s.id
-	ORDER BY score ASC, s.last_used ASC
-	LIMIT $limit
+	OPTIONAL MATCH (s)-[r:CONNECTED_TO]-()
+	RETURN s, count(r) as degree
 	`
-	const dropQuery = `CALL gds.graph.drop('janitorGraph', false) YIELD graphName`
+	params := map[string]any{"threshold": threshold}
 
-	// We use a transaction to ensure cleanup
-	session := v.driver.NewSession(ctx, neo4j.SessionConfig{DatabaseName: v.dbName})
-	defer session.Close(ctx)
-
-	var ids []string
-	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		// Create projection
-		_, err := tx.Run(ctx, projectionQuery, nil)
-		if err != nil {
-			return nil, err
-		}
-
-		// Run PageRank with Resonance filtering
-		res, err := tx.Run(ctx, pageRankQuery, map[string]any{"limit": limit, "threshold": threshold})
-		if err != nil {
-			return nil, err
-		}
-
-		for res.Next(ctx) {
-			id, _ := res.Record().Get("s.id")
-			ids = append(ids, id.(string))
-		}
-
-		// Drop projection
-		_, _ = tx.Run(ctx, dropQuery, nil)
-		return nil, nil
-	})
-
-	if err == nil && len(ids) > 0 {
-		return ids, nil
-	}
-
-	// 2. Fallback to Degree Centrality + Core Resonance protection if GDS fails or no links exist
-	fallbackQuery := `
-	MATCH (core:Shard {category: 'core'})
-	MATCH (s:Shard) WHERE s.category <> 'core'
-	WITH s, core, gds.similarity.cosine(s.embedding, core.embedding) as sim
-	WITH s, max(sim) as maxResonance
-	WHERE maxResonance < parseFloat($threshold)
-
-	OPTIONAL MATCH (s)-[r]-()
-	WITH s, count(r) as links
-	ORDER BY links ASC, s.last_used ASC
-	LIMIT $limit
-	RETURN s.id
-	`
-	params := map[string]any{"limit": limit, "threshold": threshold}
-
-	result, err := neo4j.ExecuteQuery(ctx, v.driver, fallbackQuery, params, neo4j.EagerResultTransformer,
+	result, err := neo4j.ExecuteQuery(ctx, v.driver, candidateQuery, params, neo4j.EagerResultTransformer,
 		neo4j.ExecuteQueryWithDatabase(v.dbName))
 	if err != nil {
 		return nil, err
 	}
 
-	ids = nil
+	// Score each candidate using the full Survival Formula v4.1
+	type scoredCandidate struct {
+		id    string
+		score float64
+	}
+	candidates := make([]scoredCandidate, 0, len(result.Records))
+
 	for _, record := range result.Records {
-		id, _ := record.Get("s.id")
-		ids = append(ids, id.(string))
+		node, _ := record.Get("s")
+		degree, _ := record.Get("degree")
+
+		shard := nodeToShard(node.(neo4j.Node))
+		bondCount := int(degree.(int64))
+
+		score := SurvivalScoreV4(bondCount, shard.PageRank, shard.Salience, shard.RetrievalHistory, shard.LastUsed)
+		candidates = append(candidates, scoredCandidate{id: shard.ID, score: score})
+
+		log.Printf("[Janitor] Candidate %s — survival=%.2f (bonds=%d, pagerank=%.4f, salience=%.2f)",
+			shard.ID, score, bondCount, shard.PageRank, shard.Salience)
+	}
+
+	// Sort ascending — lowest survival scores get evicted first
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].score < candidates[j].score
+	})
+
+	// Return the lowest N
+	if limit > len(candidates) {
+		limit = len(candidates)
+	}
+	ids := make([]string, limit)
+	for i := 0; i < limit; i++ {
+		ids[i] = candidates[i].id
 	}
 	return ids, nil
 }

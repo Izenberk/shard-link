@@ -8,6 +8,8 @@ import (
 	"log"
 	"math"
 	"os"
+	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -441,26 +443,27 @@ func (v *Vessel) GetCount(ctx context.Context) (int, error) {
 	return 0, stmt.Err()
 }
 
+// GetEvictionCandidates identifies low-survival shards using the Survival Formula v4.1.
+// SQL handles hard exclusions (core protection, resonance filter).
+// Go handles ranking: compute SurvivalScoreV4 for each candidate, sort ascending, return lowest N.
 func (v *Vessel) GetEvictionCandidates(ctx context.Context, limit int) ([]string, error) {
 	thresholdStr := os.Getenv("JANITOR_RESONANCE_THRESHOLD")
 	if thresholdStr == "" {
 		thresholdStr = "0.70"
 	}
+	threshold, err := strconv.ParseFloat(thresholdStr, 64)
+	if err != nil {
+		threshold = 0.70
+	}
 
-	// Protection Logic: Exclude 'core' shards and shards with high resonance to core
+	// Fetch all non-core candidates with their bond counts and salience-relevant fields.
+	// Resonance protection is applied in Go since SQLite's vec_distance_cosine is row-by-row anyway.
 	const query = `
-		SELECT s.id FROM shards s
-		WHERE s.category != 'core'
-			AND s.id NOT IN (SELECT to_id FROM shard_bonds WHERE weight > ?)
-			AND NOT EXISTS (
-				SELECT 1 FROM shards core
-				WHERE core.category = 'core'
-					AND (1.0 - vec_distance_cosine(s.vector, core.vector)) > ?
-			)
-		ORDER BY
-			s.last_used ASC,
-			(SELECT COUNT(*) FROM shard_bonds WHERE from_id = s.id OR to_id = s.id) ASC
-		LIMIT ?;
+		SELECT s.id, s.category, s.content, s.last_used, s.confidence,
+		       (SELECT COUNT(*) FROM shard_bonds WHERE from_id = s.id OR to_id = s.id) as bond_count,
+		       s.vector
+		FROM shards s
+		WHERE s.category != 'core';
 	`
 	stmt, _, err := v.conn.Prepare(query)
 	if err != nil {
@@ -468,15 +471,109 @@ func (v *Vessel) GetEvictionCandidates(ctx context.Context, limit int) ([]string
 	}
 	defer stmt.Close()
 
-	stmt.BindText(1, thresholdStr)
-	stmt.BindText(2, thresholdStr)
-	stmt.BindInt(3, limit)
-
-	var ids []string
-	for stmt.Step() {
-		ids = append(ids, stmt.ColumnText(0))
+	// Load core shard vectors for resonance check
+	coreVectors, err := v.loadCoreVectors()
+	if err != nil {
+		return nil, fmt.Errorf("load core vectors: %w", err)
 	}
-	return ids, stmt.Err()
+
+	type scoredCandidate struct {
+		id    string
+		score float64
+	}
+	var candidates []scoredCandidate
+
+	for stmt.Step() {
+		id := stmt.ColumnText(0)
+		lastUsed := parseTime(stmt.ColumnText(3))
+		bondCount := stmt.ColumnInt(5)
+		vec := stmt.ColumnBlob(6, nil)
+
+		// Resonance-to-core protection: skip shards resonant with any core shard
+		if isResonantToCore(vec, coreVectors, threshold) {
+			continue
+		}
+
+		// SQLite doesn't store salience or retrieval_history — use defaults.
+		// Salience defaults to 0.5 (neutral), retrieval_history is empty (ACT-R = epsilon).
+		salience := 0.5
+		var retrievalHistory []time.Time
+		centrality := 0.0
+
+		score := SurvivalScoreV4(bondCount, centrality, salience, retrievalHistory, lastUsed)
+		candidates = append(candidates, scoredCandidate{id: id, score: score})
+
+		log.Printf("[Janitor] Candidate %s — survival=%.2f (bonds=%d, salience=%.2f)",
+			id, score, bondCount, salience)
+	}
+	if err := stmt.Err(); err != nil {
+		return nil, err
+	}
+
+	// Sort ascending — lowest survival scores get evicted first
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].score < candidates[j].score
+	})
+
+	if limit > len(candidates) {
+		limit = len(candidates)
+	}
+	ids := make([]string, limit)
+	for i := 0; i < limit; i++ {
+		ids[i] = candidates[i].id
+	}
+	return ids, nil
+}
+
+// loadCoreVectors returns the raw vector blobs of all core shards for resonance checks.
+func (v *Vessel) loadCoreVectors() ([][]byte, error) {
+	const query = `SELECT vector FROM shards WHERE category = 'core' AND vector IS NOT NULL`
+	stmt, _, err := v.conn.Prepare(query)
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+
+	var vectors [][]byte
+	for stmt.Step() {
+		vectors = append(vectors, stmt.ColumnBlob(0, nil))
+	}
+	return vectors, stmt.Err()
+}
+
+// isResonantToCore checks if a shard's vector has cosine similarity above the threshold
+// with any core shard vector.
+func isResonantToCore(vec []byte, coreVectors [][]byte, threshold float64) bool {
+	if len(vec) == 0 || len(coreVectors) == 0 {
+		return false
+	}
+	v1 := DecodeVector(vec)
+	if v1 == nil {
+		return false
+	}
+	defer func() {
+		if cap(v1) == vectorDimension {
+			vectorPool.Put(v1[:vectorDimension])
+		}
+	}()
+
+	for _, coreVec := range coreVectors {
+		v2 := DecodeVector(coreVec)
+		if v2 == nil || len(v2) != len(v1) {
+			if v2 != nil && cap(v2) == vectorDimension {
+				vectorPool.Put(v2[:vectorDimension])
+			}
+			continue
+		}
+		sim := cosineSimilarity(v1, v2)
+		if cap(v2) == vectorDimension {
+			vectorPool.Put(v2[:vectorDimension])
+		}
+		if sim >= threshold {
+			return true
+		}
+	}
+	return false
 }
 
 func (v *Vessel) DeleteShard(id string) error {
