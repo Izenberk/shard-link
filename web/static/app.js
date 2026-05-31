@@ -851,9 +851,8 @@ function renderHealthPanel(sb) {
 
 // Ignite
 initViz();
-loadGraph();
+loadGraph().then(() => loadHealthDistribution());
 initActivityFeed();
-loadHealthDistribution();
 
 window.addEventListener('resize', () => {
     width = window.innerWidth;
@@ -888,10 +887,10 @@ window.refreshCurrentMetrics = async function() {
     } catch (err) { console.error(err); }
 }
 
-setInterval(() => {
+setInterval(async () => {
     if (searchActive) return; // Don't overwrite search results — user clicks RESET to exit
     if (!document.getElementById('details').classList.contains('active') && !bondMode && !focusMode) {
-        loadGraph();
+        await loadGraph();
         loadHealthDistribution();
     }
 }, 15000);

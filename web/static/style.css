@@ -195,8 +195,9 @@ h3 { margin: 0 0 15px 0; color: var(--accent); font-size: 11px; letter-spacing: 
 /* Activity Feed */
 #activity-feed {
     position: fixed;
-    bottom: 20px;
-    left: 20px;
+    bottom: 80px;
+    right: 30px;
+    left: auto;
     width: 320px;
     height: 180px;
     background: rgba(10, 15, 20, 0.85);
@@ -205,10 +206,12 @@ h3 { margin: 0 0 15px 0; color: var(--accent); font-size: 11px; letter-spacing: 
     border-radius: 4px;
     display: flex;
     flex-direction: column;
-    z-index: 1000;
+    z-index: 10;
     font-family: 'JetBrains Mono', monospace;
     overflow: hidden;
+    transition: right 0.3s ease;
 }
+#details.active ~ #activity-feed { right: 430px; }
 
 .activity-header {
     background: rgba(20, 30, 40, 0.9);
@@ -333,11 +336,15 @@ h3 { margin: 0 0 15px 0; color: var(--accent); font-size: 11px; letter-spacing: 
     letter-spacing: 1px;
 }
 
-/* Activity Feed Overlap Fix */
-#activity-feed {
-    bottom: 30px; /* Aligned with toolbar */
-    left: 30px;
+/* Scroll containment for left sidebar */
+#controls {
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+    overflow-x: hidden;
 }
+#controls::-webkit-scrollbar { width: 4px; }
+#controls::-webkit-scrollbar-track { background: transparent; }
+#controls::-webkit-scrollbar-thumb { background: var(--panel-border); border-radius: 2px; }
 
 /* L.5 — Additional log type colors */
 .log-type-system { color: #555e6b; }
