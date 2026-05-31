@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/izenberk/shard-link/internal/metrics"
 	"github.com/izenberk/shard-link/internal/storage"
 	"github.com/joho/godotenv"
 )
@@ -183,6 +184,8 @@ func main() {
 	http.HandleFunc("/api/evict", srv.handleEvict)
 	http.HandleFunc("/api/community", srv.handleGetCommunity)
 	http.HandleFunc("/api/prune-summaries", srv.handlePruneSummaries)
+	http.HandleFunc("/api/health", srv.handleHealthDistribution)
+	http.HandleFunc("/metrics", srv.handleMetrics)
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "OK. Booted: %v", srv.bootTime.Format(time.RFC3339))
 	})
@@ -453,6 +456,17 @@ func (s *Server) handlePruneSummaries(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]any{"pruned": pruned})
 }
 
+func (s *Server) handleHealthDistribution(w http.ResponseWriter, r *http.Request) {
+	sb := metrics.GetSurvivalBuckets()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(sb)
+}
+
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	fmt.Fprint(w, metrics.RenderPrometheus())
+}
+
 func (s *Server) packData(shards []storage.Shard, bonds []storage.ShardBond) VizData {
 	tStr := os.Getenv("MESH_LINK_THRESHOLD")
 	threshold, _ := strconv.ParseFloat(tStr, 64)
@@ -473,50 +487,86 @@ func (s *Server) packData(shards []storage.Shard, bonds []storage.ShardBond) Viz
 		bondCounts[b.ToID]++
 	}
 
-	for i, s := range shards {
+	// Metrics accumulators — computed as we iterate shards
+	var sb metrics.SurvivalBuckets
+	var mg metrics.MeshGauges
+	mg.BondsTotal = len(bonds)
+	var maxCommunity int64
+
+	for i, sh := range shards {
 		// Usage Reinforcement: Survival is based on LastUsed (Recency) rather than Creation
-		lastUsed := s.LastUsed
+		lastUsed := sh.LastUsed
 		if lastUsed.IsZero() || lastUsed.Year() < 2000 {
-			lastUsed = s.CreatedAt
+			lastUsed = sh.CreatedAt
 			if lastUsed.IsZero() || lastUsed.Year() < 2000 {
 				lastUsed = time.Now().Add(-1 * time.Hour)
 			}
 		}
 
-		links := bondCounts[s.ID]
+		links := bondCounts[sh.ID]
 
 		// Backward compat: unscored shards default to 0.5
-		salience := s.Salience
+		salience := sh.Salience
 		if salience < 0.1 {
 			salience = 0.5
 		}
 
-		// Dual-score benchmark: v3.5 (legacy) vs v4.1 (FSRS-calibrated decay)
-		v35 := storage.SurvivalScoreV35(links, s.PageRank, s.UseCount, lastUsed)
-		v41 := storage.SurvivalScoreV4(links, s.PageRank, salience, s.RetrievalHistory, lastUsed)
-
-		survival := v41
-		if s.Category == "core" {
-			survival = 100 // Core shards are the "Gold Standard" (100)
+		survival := storage.SurvivalScoreV4(links, sh.PageRank, salience, sh.RetrievalHistory, lastUsed)
+		if sh.Category == "core" {
+			survival = 100
 		}
 
-		log.Printf("[BENCHMARK] shard=%s v35=%.2f v41=%.2f delta=%.2f", s.ID, v35, v41, v41-v35)
+		// Accumulate metrics
+		sb.Total++
+		switch {
+		case survival <= 20:
+			sb.Le20++
+		case survival <= 50:
+			sb.Le50++
+		case survival <= 80:
+			sb.Le80++
+		case survival <= 95:
+			sb.Le95++
+		default:
+			sb.Le100++
+		}
+
+		switch sh.Category {
+		case "core":
+			mg.ShardsCore++
+		case "memory":
+			mg.ShardsMemory++
+		case "session":
+			mg.ShardsSession++
+		case "archived":
+			mg.ShardsArchived++
+		}
+
+		if sh.CommunityID > maxCommunity {
+			maxCommunity = sh.CommunityID
+		}
 
 		data.Nodes[i] = VizNode{
-			ID:         s.ID,
-			Category:   s.Category,
-			Content:    s.Content,
-			Community:  s.CommunityID,
-			PageRank:   s.PageRank,
+			ID:         sh.ID,
+			Category:   sh.Category,
+			Content:    sh.Content,
+			Community:  sh.CommunityID,
+			PageRank:   sh.PageRank,
 			Survival:   survival,
-			CreatedAt:  s.CreatedAt.Format("2006-01-02 15:04:05"),
-			SourceType: s.SourceType,
-			SourceRef:  s.SourceRef,
-			Confidence: s.Confidence,
+			CreatedAt:  sh.CreatedAt.Format("2006-01-02 15:04:05"),
+			SourceType: sh.SourceType,
+			SourceRef:  sh.SourceRef,
+			Confidence: sh.Confidence,
 		}
 	}
 	for i, b := range bonds {
 		data.Links[i] = VizLink{Source: b.FromID, Target: b.ToID, Weight: b.Weight}
 	}
+
+	// Publish metrics for /metrics and /api/health endpoints
+	mg.CommunitiesMax = maxCommunity
+	metrics.SetMeshGauges(mg)
+	metrics.SetSurvivalBuckets(sb)
+
 	return data
 }

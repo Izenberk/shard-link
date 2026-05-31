@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/izenberk/shard-link/internal/hygiene"
@@ -16,10 +19,20 @@ import (
 )
 
 func main() {
+	// 0. Configure structured logging.
+	// JSON in production (Docker log driver), text for local development.
+	var handler slog.Handler
+	if os.Getenv("LOG_FORMAT") == "json" {
+		handler = slog.NewJSONHandler(os.Stdout, nil)
+	} else {
+		handler = slog.NewTextHandler(os.Stdout, nil)
+	}
+	slog.SetDefault(slog.New(handler))
+
 	// 1. Load Credentials
 	apiKey := os.Getenv("HUB_API_KEY")
 	if apiKey == "" {
-		log.Println("WARNING: HUB_API_KEY is not set. Server is running without authentication.")
+		slog.Warn("HUB_API_KEY is not set — server running without authentication")
 	}
 
 	// 1.5 Configure Embedding Dimension (before any vessel or pool usage)
@@ -41,38 +54,46 @@ func main() {
 
 	for i := 0; i < maxRetries; i++ {
 		if neoURL != "" {
-			// Knowledge Mesh Mode
 			user := os.Getenv("NEO4J_USER")
 			pass := os.Getenv("NEO4J_PASS")
 			v, err = storage.NewVesselGraph(neoURL, user, pass, "neo4j")
 			if err == nil {
-				log.Println("SHARD-LINK: Knowledge Mesh Ignited (Neo4j Graph)")
+				slog.Info("vessel ignited", "engine", "neo4j")
 				break
 			}
 		} else if connStr := os.Getenv("DATABASE_URL"); connStr != "" {
-			// Legacy High Performance Mode
 			v, err = storage.NewPostgresVessel(context.Background(), connStr)
 			if err == nil {
-				log.Println("SHARD-LINK: PostgreSQL Vessel Ignited (Legacy storage)")
+				slog.Info("vessel ignited", "engine", "postgres")
 				break
 			}
 		} else {
-			// Local-First Mode
 			dbPath := os.Getenv("DATABASE_PATH")
-			if dbPath == "" { dbPath = "data/shard-link.db" }
+			if dbPath == "" {
+				dbPath = "data/shard-link.db"
+			}
 			v, err = storage.NewVessel(dbPath)
 			if err == nil {
-				log.Println("SHARD-LINK: SQLite Vessel Ignited")
+				slog.Info("vessel ignited", "engine", "sqlite")
 				break
 			}
 		}
 
-		log.Printf("Vessel failed to ignite (attempt %d/%d): %v. Retrying in %v...", i+1, maxRetries, err, retryDelay)
+		slog.Warn("vessel failed to ignite — retrying",
+			"attempt", i+1,
+			"max_retries", maxRetries,
+			"error", err,
+			"retry_delay", retryDelay,
+		)
 		time.Sleep(retryDelay)
 	}
 
 	if err != nil {
-		log.Fatalf("Vessel failed to ignite after %d attempts: %v", maxRetries, err)
+		slog.Error("vessel failed to ignite — giving up",
+			"attempts", maxRetries,
+			"error", err,
+		)
+		os.Exit(1)
 	}
 	defer v.Close()
 
@@ -90,18 +111,21 @@ func main() {
 				ShardID: shardID,
 			})
 		}
-		log.Println("SHARD-LINK: Activity Ledger Connected (SQLite)")
+		slog.Info("activity ledger connected", "engine", "sqlite")
 	}
 
-	// 3. Summon the Servants (Janitor & Synthesizer)
+	// 3. Cancellation context + WaitGroup for graceful shutdown.
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+
+	// 3.1 Summon the Janitor
 	jan := janitor.NewJanitor(v, 15*time.Minute, 1000, storage.GlobalLogger)
 
-	// Synthesizer wiring is deferred until after embedder init (step 5)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go jan.Run(ctx)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		jan.Run(ctx)
+	}()
 
 	// 4. Summon the HygieneWorker (Storage Maintenance)
 	graphV, _ := v.(*storage.VesselGraph)
@@ -117,43 +141,47 @@ func main() {
 		}
 	}
 	hygieneWorker := hygiene.NewHygieneWorker(graphV, av, lv, hygieneInterval, storage.GlobalLogger)
-	go hygieneWorker.Run(ctx)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		hygieneWorker.Run(ctx)
+	}()
 
 	// 5. Configure Intelligence
 	var emb storage.Embedder
-	mode := os.Getenv("EMBEDDING_MODE") // options: "none", "server", "local"
-	
+	mode := os.Getenv("EMBEDDING_MODE")
+
 	switch mode {
 	case "server":
-		// Cloud Mode: Zero local hardware load, utilizes Gemini API
 		geminiKey := os.Getenv("GEMINI_API_KEY")
 		if geminiKey == "" {
-			log.Fatal("EMBEDDING_MODE='server' but GEMINI_API_KEY is not set.")
+			slog.Error("EMBEDDING_MODE=server but GEMINI_API_KEY is not set")
+			os.Exit(1)
 		}
 
 		model := os.Getenv("EMBEDDING_MODEL")
 		if model == "" {
 			model = "gemini-embedding-001"
 		}
-		
+
 		geminiEmb, err := storage.NewGeminiEmbedder(ctx, geminiKey, model, targetDim)
 		if err != nil {
-			log.Fatalf("Failed to ignite Cloud Embedder: %v", err)
+			slog.Error("cloud embedder failed to ignite", "error", err)
+			os.Exit(1)
 		}
 		emb = geminiEmb
-		log.Printf("SHARD-LINK: Cloud Intelligence Active (%s @ %d-D)", model, targetDim)
-		
+		slog.Info("intelligence active", "mode", "cloud", "model", model, "dim", targetDim)
+
 	case "local":
-		// Local Mode: Privacy-first, runs a model via Ollama
 		ollamaURL := os.Getenv("OLLAMA_URL")
 		ollamaModel := os.Getenv("OLLAMA_MODEL")
 		emb = storage.NewOllamaEmbedder(ollamaURL, ollamaModel)
-		log.Printf("SHARD-LINK: Ollama Intelligence Active (%s)", ollamaModel)
+		slog.Info("intelligence active", "mode", "local", "model", ollamaModel)
 
 	default:
-		// None Mode: Hardware/Budget constraint fallback
 		emb = storage.NewMockEmbedder(targetDim)
-		log.Println("SHARD-LINK: Intelligence is in 'Manual/Mock' mode (No embedding)")
+		slog.Info("intelligence active", "mode", "mock")
 	}
 
 	// 5.5 Initialize Summarizer and launch Synthesizer
@@ -167,11 +195,11 @@ func main() {
 		geminiKey := os.Getenv("GEMINI_API_KEY")
 		geminiSum, err := storage.NewGeminiSummarizer(ctx, geminiKey, sumModel)
 		if err != nil {
-			log.Printf("WARNING: Failed to ignite Summarizer: %v. Community summaries disabled.", err)
+			slog.Warn("summarizer failed to ignite — community summaries disabled", "error", err)
 			sum = storage.NewMockSummarizer()
 		} else {
 			sum = geminiSum
-			log.Printf("SHARD-LINK: Community Summarizer Active (%s)", sumModel)
+			slog.Info("summarizer active", "model", sumModel)
 		}
 	default:
 		sum = storage.NewMockSummarizer()
@@ -184,10 +212,15 @@ func main() {
 		}
 	}
 	syn := synthesizer.NewSynthesizer(v, synthInterval, emb, sum, storage.GlobalLogger)
-	go syn.Run(ctx)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		syn.Run(ctx)
+	}()
 
 	// 6. Launch the Authenticated Bridge
-	srv := mcp.NewMCPServer(v, apiKey, emb, sum)
+	srv := mcp.NewMCPServer(v, apiKey, emb, sum, ctx)
 
 	publicURL := os.Getenv("PUBLIC_URL")
 	if publicURL == "" {
@@ -195,16 +228,39 @@ func main() {
 	}
 
 	go func() {
-		if err := srv.StartHub(8080, publicURL); err != nil {
-			log.Fatalf("Bridge collapsed: %v", err)
+		if err := srv.StartHub(ctx, 8080, publicURL); err != nil && err != http.ErrServerClosed {
+			slog.Error("bridge collapsed", "error", err)
+			os.Exit(1)
 		}
 	}()
 
-	log.Println("SHARD-LINK Hub is ONLINE (Authenticated).")
+	slog.Info("hub online", "port", 8080, "public_url", publicURL)
 
-	// Graceful Shutdown handling
+	// 7. Graceful Shutdown
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt)
-	<-sigChan 
-	log.Println("SHARD-LINK Hub shutting down...")
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	sig := <-sigChan
+
+	slog.Info("shutdown signal received", "signal", sig.String())
+
+	cancel()
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		slog.Warn("HTTP server drain error", "error", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		slog.Info("shutdown complete — all goroutines drained")
+	case <-time.After(10 * time.Second):
+		slog.Warn("shutdown timed out — forcing exit")
+	}
 }

@@ -77,6 +77,13 @@ func SurvivalScoreV4(density int, centrality, salience float64, history []time.T
 		activation = 0.0
 	}
 
+	// Guard: zero-timestamp defense. If lastUsed is zero (0001-01-01) or pre-epoch,
+	// treat it as "just now" rather than letting time.Since() return ~740,000 days
+	// which collapses the Ebbinghaus denominator to infinity.
+	if lastUsed.IsZero() || lastUsed.Year() < 2000 {
+		lastUsed = time.Now()
+	}
+
 	sBase := SalToStability(salience)
 	s0 := sBase * (1.0 + activation)
 

@@ -2,10 +2,10 @@ package janitor
 
 import (
 	"context"
-	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
+	"github.com/izenberk/shard-link/internal/metrics"
 	"github.com/izenberk/shard-link/internal/storage"
 )
 
@@ -38,14 +38,14 @@ func (j *Janitor) logActivity(msg, category, shardID string) {
 }
 
 func (j *Janitor) Run(ctx context.Context) {
-	log.Printf("[Janitor] Service started. Interval: %v, MaxSize: %d", j.interval, j.maxSize)
+	slog.Info("janitor started", "interval", j.interval, "max_size", j.maxSize)
 	ticker := time.NewTicker(j.interval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("[Janitor] Service shutting down...")
+			slog.Info("janitor shutting down")
 			return		// Context cancelled, stop the Janitor
 		case <-ticker.C:
 			j.performCleanup(ctx)
@@ -54,41 +54,44 @@ func (j *Janitor) Run(ctx context.Context) {
 }
 
 func (j *Janitor) performCleanup(ctx context.Context) {
-	log.Println("[Janitor] Starting cleanup cycle...")
+	start := time.Now()
+	slog.Debug("janitor cleanup cycle starting")
 	count, err := j.vessel.GetCount(ctx)
 	if err != nil {
-		log.Printf("[Janitor ERROR] Failed to get shard count: %v", err)
+		slog.Error("janitor failed to get shard count", "error", err)
 		return
 	}
 
-	j.logActivity(fmt.Sprintf("Janitor cycle started. Shard count: %d/%d", count, j.maxSize), "system", "")
+	j.logActivity("Janitor cycle started", "system", "")
 
 	if count <= j.maxSize {
-		log.Printf("[Janitor] Vessel within limits (%d/%d). No action needed.", count, j.maxSize)
-		j.logActivity(fmt.Sprintf("Janitor: mesh within limits (%d/%d)", count, j.maxSize), "system", "")
-		return // Vessel is within safe limits
+		slog.Debug("janitor: mesh within limits", "count", count, "max", j.maxSize)
+		j.logActivity("Janitor: mesh within limits", "system", "")
+		return
 	}
 
 	overage := count - j.maxSize
-	log.Printf("[Janitor] Shard overage detected (+%d). Identifying eviction candidates...", overage)
-	j.logActivity(fmt.Sprintf("Overage detected: +%d shards above limit", overage), "warn", "")
+	slog.Info("janitor overage detected", "overage", overage, "count", count, "max", j.maxSize)
+	j.logActivity("Overage detected", "warn", "")
 
 	candidates, err := j.vessel.GetEvictionCandidates(ctx, overage)
 	if err != nil {
-		log.Printf("[Janitor ERROR] Failed to get eviction candidates: %v", err)
+		slog.Error("janitor failed to get eviction candidates", "error", err)
 		return
 	}
 
 	for _, id := range candidates {
-		log.Printf("[Janitor] Evicting shard: %s", id)
-		j.logActivity(fmt.Sprintf("Janitor evicted: %s", id), "evict", id)
+		slog.Info("janitor evicting shard", "shard_id", id)
+		j.logActivity("Janitor evicted: "+id, "evict", id)
 		_ = j.vessel.ArchiveShard(ctx, id)
+		metrics.JanitorEvictionsTotal.Add(1)
 	}
 
 	if len(candidates) > 0 {
-		log.Printf("[Janitor] Evicted %d shards. Running storage optimization...", len(candidates))
+		slog.Info("janitor eviction complete — running optimization", "evicted", len(candidates))
 		_ = j.vessel.Optimize(ctx)
 	}
-	log.Println("[Janitor] Cleanup cycle complete.")
-	j.logActivity(fmt.Sprintf("Janitor cycle complete. Evicted: %d", len(candidates)), "system", "")
+	metrics.JanitorCycleLatency.Observe(time.Since(start))
+	slog.Debug("janitor cleanup cycle complete")
+	j.logActivity("Janitor cycle complete", "system", "")
 }

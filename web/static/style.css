@@ -472,3 +472,37 @@ h3 { margin: 0 0 15px 0; color: var(--accent); font-size: 11px; letter-spacing: 
 .log-filter-btn[data-type="system"] { color: #555e6b; border-color: rgba(85, 94, 107, 0.3); }
 .log-filter-btn[data-type="search"] { color: #a371f7; border-color: rgba(163, 113, 247, 0.3); }
 .log-filter-btn[data-type="error"] { color: #ff2d2d; border-color: rgba(255, 45, 45, 0.3); }
+
+/* Survival Distribution Panel */
+.health-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+}
+.health-label {
+    width: 36px;
+    color: var(--text-muted);
+    text-align: right;
+    flex-shrink: 0;
+}
+.health-bar-bg {
+    flex: 1;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 2px;
+    overflow: hidden;
+}
+.health-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.4s ease;
+}
+.health-count {
+    width: 24px;
+    color: var(--accent);
+    text-align: right;
+    flex-shrink: 0;
+}

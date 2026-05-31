@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"log"
+	"log/slog"
 	"math"
 	"sort"
 	"strconv"
@@ -45,8 +45,8 @@ func (v *PostgresVessel) Close() error {
 
 func (v *PostgresVessel) SaveShard(ctx context.Context, s Shard) error {
 	const query = `
-		INSERT INTO shards (id, category, content, vector, metadata, source_type, source_ref, confidence)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO shards (id, category, content, vector, metadata, source_type, source_ref, confidence, salience, retrieval_history)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT(id) DO UPDATE SET
 			category = EXCLUDED.category,
 			content = EXCLUDED.content,
@@ -55,19 +55,23 @@ func (v *PostgresVessel) SaveShard(ctx context.Context, s Shard) error {
 			source_type = EXCLUDED.source_type,
 			source_ref = EXCLUDED.source_ref,
 			confidence = EXCLUDED.confidence,
+			salience = EXCLUDED.salience,
+			retrieval_history = EXCLUDED.retrieval_history,
 			last_used = CURRENT_TIMESTAMP;
 	`
-	_, err := v.pool.Exec(ctx, query, s.ID, s.Category, s.Content, formatVector(s.Vector), s.Metadata, s.SourceType, s.SourceRef, s.Confidence)
+	_, err := v.pool.Exec(ctx, query, s.ID, s.Category, s.Content, formatVector(s.Vector),
+		s.Metadata, s.SourceType, s.SourceRef, s.Confidence,
+		s.Salience, serializeRetrievalHistoryPG(s.RetrievalHistory))
 	if err == nil {
-		log.Printf("[Vessel-Postgres] Shard Saved: %s (Category: %s)", s.ID, s.Category)
+		slog.Debug("shard saved", "engine", "postgres", "id", s.ID, "category", s.Category)
 	}
 	return err
 }
 
 func (v *PostgresVessel) SaveArchivedShard(ctx context.Context, s Shard) error {
 	const query = `
-		INSERT INTO shards_archive (id, category, content, vector, metadata, source_type, source_ref, confidence)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO shards_archive (id, category, content, vector, metadata, source_type, source_ref, confidence, salience, retrieval_history)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT(id) DO UPDATE SET
 			category = EXCLUDED.category,
 			content = EXCLUDED.content,
@@ -75,9 +79,13 @@ func (v *PostgresVessel) SaveArchivedShard(ctx context.Context, s Shard) error {
 			metadata = EXCLUDED.metadata,
 			source_type = EXCLUDED.source_type,
 			source_ref = EXCLUDED.source_ref,
-			confidence = EXCLUDED.confidence;
+			confidence = EXCLUDED.confidence,
+			salience = EXCLUDED.salience,
+			retrieval_history = EXCLUDED.retrieval_history;
 	`
-	_, err := v.pool.Exec(ctx, query, s.ID, s.Category, s.Content, formatVector(s.Vector), s.Metadata, s.SourceType, s.SourceRef, s.Confidence)
+	_, err := v.pool.Exec(ctx, query, s.ID, s.Category, s.Content, formatVector(s.Vector),
+		s.Metadata, s.SourceType, s.SourceRef, s.Confidence,
+		s.Salience, serializeRetrievalHistoryPG(s.RetrievalHistory))
 	return err
 }
 
@@ -183,9 +191,24 @@ func (v *PostgresVessel) FindText(ctx context.Context, query string, limit int, 
 	return shards, rows.Err()
 }
 
-// ReinforceShards manually updates usage metrics for a list of shard IDs.
+// ReinforceShards updates usage metrics for a list of shard IDs.
+// Appends to retrieval_history (capped at last 20 timestamps) and bumps last_used.
 func (v *PostgresVessel) ReinforceShards(ctx context.Context, ids []string) error {
-	const query = "UPDATE shards SET last_used = CURRENT_TIMESTAMP WHERE id = ANY($1)"
+	const query = `
+		UPDATE shards
+		SET last_used = CURRENT_TIMESTAMP,
+		    retrieval_history = (
+		        ARRAY_APPEND(
+		            COALESCE(retrieval_history, '{}'),
+		            TO_CHAR(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+		        )
+		    )[array_length(
+		        ARRAY_APPEND(
+		            COALESCE(retrieval_history, '{}'),
+		            TO_CHAR(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+		        ), 1) - 19:]
+		WHERE id = ANY($1)
+	`
 	_, err := v.pool.Exec(ctx, query, ids)
 	return err
 }
@@ -331,10 +354,8 @@ func (v *PostgresVessel) GetCount(ctx context.Context) (int, error) {
 // SQL handles hard exclusions (core protection).
 // Go handles ranking: compute SurvivalScoreV4 for each candidate, sort ascending, return lowest N.
 func (v *PostgresVessel) GetEvictionCandidates(ctx context.Context, limit int) ([]string, error) {
-	// Fetch all non-core candidates with bond counts and last_used.
-	// Postgres doesn't run GDS (no PageRank), doesn't store retrieval_history or salience.
 	const query = `
-		SELECT s.id, s.last_used,
+		SELECT s.id, s.last_used, s.salience, s.retrieval_history,
 		       COALESCE(b.link_count, 0) as bond_count
 		FROM shards s
 		LEFT JOIN (
@@ -357,22 +378,27 @@ func (v *PostgresVessel) GetEvictionCandidates(ctx context.Context, limit int) (
 	for rows.Next() {
 		var id string
 		var lastUsed time.Time
+		var salience float64
+		var rhRaw []string
 		var bondCount int
 
-		if err := rows.Scan(&id, &lastUsed, &bondCount); err != nil {
+		if err := rows.Scan(&id, &lastUsed, &salience, &rhRaw, &bondCount); err != nil {
 			return nil, err
 		}
 
-		// Postgres defaults: no PageRank (centrality=0), no salience (0.5), no retrieval_history (empty).
-		centrality := 0.0
-		salience := 0.5
-		var retrievalHistory []time.Time
+		// Guard: floor salience at 0.1 (same as Neo4j convention)
+		if salience < 0.1 {
+			salience = 0.5
+		}
+
+		retrievalHistory := deserializeRetrievalHistoryPG(rhRaw)
+		centrality := 0.0 // Postgres still doesn't run GDS — no PageRank
 
 		score := SurvivalScoreV4(bondCount, centrality, salience, retrievalHistory, lastUsed)
 		candidates = append(candidates, scoredCandidate{id: id, score: score})
 
-		log.Printf("[Janitor] Candidate %s — survival=%.2f (bonds=%d, salience=%.2f)",
-			id, score, bondCount, salience)
+		slog.Debug("eviction candidate scored",
+			"id", id, "survival", score, "bonds", bondCount, "salience", salience, "retrieval_history", len(retrievalHistory))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -474,6 +500,32 @@ func (v *PostgresVessel) Optimize(ctx context.Context) error {
 		return fmt.Errorf("postgres vacuum failed: %w", err)
 	}
 	return nil
+}
+
+// serializeRetrievalHistoryPG converts Go timestamps to a Postgres TEXT[] compatible format.
+func serializeRetrievalHistoryPG(history []time.Time) []string {
+	if len(history) == 0 {
+		return []string{}
+	}
+	out := make([]string, len(history))
+	for i, t := range history {
+		out[i] = t.Format(time.RFC3339)
+	}
+	return out
+}
+
+// deserializeRetrievalHistoryPG converts a Postgres TEXT[] back to Go timestamps.
+func deserializeRetrievalHistoryPG(raw []string) []time.Time {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]time.Time, 0, len(raw))
+	for _, s := range raw {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 func formatVector(v []byte) *string {

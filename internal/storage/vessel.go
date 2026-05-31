@@ -5,7 +5,7 @@ import (
 	_ "embed"
 	"encoding/binary"
 	"fmt"
-	"log"
+	"log/slog"
 	"math"
 	"os"
 	"sort"
@@ -126,7 +126,7 @@ func (v *Vessel) SaveShard(ctx context.Context, s Shard) error {
 	if err := stmt.Exec(); err != nil {
 		return fmt.Errorf("exec save: %w", err)
 	}
-	log.Printf("[Vessel-SQLite] Shard Saved: %s (Category: %s)", s.ID, s.Category)
+	slog.Debug("shard saved", "engine", "sqlite", "id", s.ID, "category", s.Category)
 	return nil
 }
 
@@ -503,8 +503,8 @@ func (v *Vessel) GetEvictionCandidates(ctx context.Context, limit int) ([]string
 		score := SurvivalScoreV4(bondCount, centrality, salience, retrievalHistory, lastUsed)
 		candidates = append(candidates, scoredCandidate{id: id, score: score})
 
-		log.Printf("[Janitor] Candidate %s — survival=%.2f (bonds=%d, salience=%.2f)",
-			id, score, bondCount, salience)
+		slog.Debug("eviction candidate scored",
+			"id", id, "survival", score, "bonds", bondCount, "salience", salience)
 	}
 	if err := stmt.Err(); err != nil {
 		return nil, err

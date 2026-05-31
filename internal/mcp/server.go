@@ -8,7 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/izenberk/shard-link/internal/metrics"
 	"github.com/izenberk/shard-link/internal/storage"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -36,6 +37,7 @@ type MCPServer struct {
 	embedder    storage.Embedder
 	summarizer  storage.Summarizer
 	wm          *WorkingMemory
+	httpServer  *http.Server
 
 	// Ephemeral session tokens — OAuth clients get these instead of the raw API key.
 	// Key: token string, Value: expiry time.
@@ -43,8 +45,8 @@ type MCPServer struct {
 	sessionTokensMu sync.RWMutex
 }
 
-func NewMCPServer(v storage.Repository, apiKey string, e storage.Embedder, sum storage.Summarizer) *MCPServer {
-	log.Println("[MCP] Initializing Shard-Link Hub MCP Server...")
+func NewMCPServer(v storage.Repository, apiKey string, e storage.Embedder, sum storage.Summarizer, ctx context.Context) *MCPServer {
+	slog.Info("initializing MCP server")
 
 	// 1. Create the base MCP server
 	s := server.NewMCPServer(
@@ -56,7 +58,7 @@ func NewMCPServer(v storage.Repository, apiKey string, e storage.Embedder, sum s
 	)
 
 	wm := NewWorkingMemory(30 * time.Minute)
-	wm.StartCleanup(context.Background())
+	wm.StartCleanup(ctx)
 
 	mcpSrv := &MCPServer{
 		vessel:        v,
@@ -69,12 +71,12 @@ func NewMCPServer(v storage.Repository, apiKey string, e storage.Embedder, sum s
 	}
 
 	// 2. Register tools, resources, and prompts BEFORE return
-	log.Println("[MCP] Registering Capabilities...")
+	slog.Info("registering MCP capabilities")
 	mcpSrv.RegisterTools()
 	mcpSrv.RegisterResources()
 	mcpSrv.RegisterPrompts()
 
-	log.Println("[MCP] Server Initialization Complete.")
+	slog.Info("MCP server initialization complete")
 	return mcpSrv
 }
 
@@ -133,7 +135,7 @@ const maxPendingCodes = 100
 func (s *MCPServer) withAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sessID := r.URL.Query().Get("sessionId")
-		log.Printf("[MCP-HTTP] %s %s (SessID: %s) from %s", r.Method, r.URL.Path, sessID, r.RemoteAddr)
+		slog.Debug("HTTP request", "method", r.Method, "path", r.URL.Path, "session_id", sessID, "remote", r.RemoteAddr)
 
 		// Skip auth if no key is configured (local dev only)
 		if s.apiKey == "" {
@@ -162,7 +164,7 @@ func (s *MCPServer) withAuth(next http.Handler) http.Handler {
 		}
 
 		if !authorized {
-			log.Printf("[Auth] Denied %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+			slog.Warn("auth denied", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr)
 			http.Error(w, "Unauthorized: Invalid Shard Access Key", http.StatusUnauthorized)
 			return
 		}
@@ -182,7 +184,7 @@ func (s *MCPServer) withAuth(next http.Handler) http.Handler {
 }
 
 func (s *MCPServer) RegisterTools() {
-	log.Println("[MCP] Registering Tool: search_memory")
+	slog.Debug("registering tool", "name", "search_memory")
 	searchTool := mcp.NewTool("search_memory",
 		mcp.WithDescription("Search long-term memory using semantic resonance (vector search)"),
 		mcp.WithString("query_text", mcp.Description("Natural language query to embed")),
@@ -193,7 +195,7 @@ func (s *MCPServer) RegisterTools() {
 	)
 	s.mcp.AddTool(searchTool, s.handleSearch)
 
-	log.Println("[MCP] Registering Tool: search_text")
+	slog.Debug("registering tool", "name", "search_text")
 	searchTextTool := mcp.NewTool("search_text",
 		mcp.WithDescription("Search long-term memory using keyword matching (SQL LIKE)"),
 		mcp.WithString("query", mcp.Description("The keyword or phrase to search for"), mcp.Required()),
@@ -201,7 +203,7 @@ func (s *MCPServer) RegisterTools() {
 	)
 	s.mcp.AddTool(searchTextTool, s.handleSearchText)
 
-	log.Println("[MCP] Registering Tool: save_memory")
+	slog.Debug("registering tool", "name", "save_memory")
 	saveTool := mcp.NewTool("save_memory",
 		mcp.WithDescription("Save a new contextual fragment to long-term memory"),
 		mcp.WithString("id", mcp.Description("Unique identifier"), mcp.Required()),
@@ -211,7 +213,7 @@ func (s *MCPServer) RegisterTools() {
 	)
 	s.mcp.AddTool(saveTool, s.handleSave)
 
-	log.Println("[MCP] Registering Tool: search_graph")
+	slog.Debug("registering tool", "name", "search_graph")
 	graphTool := mcp.NewTool("search_graph",
 		mcp.WithDescription("Search the Knowledge Mesh by finding a central context and traversing its semantic neighbors (Multi-Hop)"),
 		mcp.WithString("query_text", mcp.Description("Natural language query to embed")),
@@ -220,7 +222,7 @@ func (s *MCPServer) RegisterTools() {
 	)
 	s.mcp.AddTool(graphTool, s.handleSearchGraph)
 
-	log.Println("[MCP] Registering Tool: search_all")
+	slog.Debug("registering tool", "name", "search_all")
 	searchAllTool := mcp.NewTool("search_all",
 		mcp.WithDescription("Comprehensive search across all memory engines (Vector, Text, and Graph Mesh). Deduplicates results and provides relational context."),
 		mcp.WithString("query", mcp.Description("The keyword or natural language topic to search for"), mcp.Required()),
@@ -231,10 +233,13 @@ func (s *MCPServer) RegisterTools() {
 }
 
 func (s *MCPServer) handleSearchAll(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	start := time.Now()
+	metrics.SearchAllTotal.Add(1)
+
 	query := request.GetString("query", "")
 	limit := int(request.GetFloat("limit", 5))
 
-	log.Printf("[MCP] Calling Tool: search_all (query_len=%d, limit=%d)", len(query), limit)
+	slog.Info("search_all called", "query_len", len(query), "limit", limit)
 
 	// 2.3 — Query length + limit validation
 	if len(query) > maxQueryLen {
@@ -336,15 +341,19 @@ func (s *MCPServer) handleSearchAll(ctx context.Context, request mcp.CallToolReq
 		}
 	}
 
+	metrics.SearchAllLatency.Observe(time.Since(start))
 	return mcp.NewToolResultText(response), nil
 }
 
 func (s *MCPServer) handleSearchGraph(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	start := time.Now()
+	metrics.SearchGraphTotal.Add(1)
+
 	vecStr := request.GetString("query_vector", "")
 	text := request.GetString("query_text", "")
 	limit := int(request.GetFloat("limit", 10))
 
-	log.Printf("[MCP] Calling Tool: search_graph (text_len=%d, limit=%d)", len(text), limit)
+	slog.Info("search_graph called", "text_len", len(text), "limit", limit)
 
 	// 2.3 — Limit validation
 	if len(text) > maxQueryLen {
@@ -376,7 +385,7 @@ func (s *MCPServer) handleSearchGraph(ctx context.Context, request mcp.CallToolR
 
 	shards, bonds, err := s.vessel.SearchGraph(ctx, queryVec, limit, true)
 	if err != nil {
-		log.Printf("[MCP ERROR] search_graph failed: %v", err)
+		slog.Error("search_graph failed", "error", err)
 		return nil, err
 	}
 
@@ -392,11 +401,12 @@ func (s *MCPServer) handleSearchGraph(ctx context.Context, request mcp.CallToolR
 			response += fmt.Sprintf("[%s]: %s\n---\n", shard.ID, shard.Content)
 		}
 	}
+	metrics.SearchGraphLatency.Observe(time.Since(start))
 	return mcp.NewToolResultText(response), nil
 }
 
 func (s *MCPServer) RegisterResources() {
-	log.Println("[MCP] Registering Resource: shard-link://core")
+	slog.Debug("registering resource", "uri", "shard-link://core")
 	res := mcp.NewResource("shard-link://core",
 		"Core Identity",
 		mcp.WithResourceDescription("Read-only access to user profile and system anchors"),
@@ -405,10 +415,10 @@ func (s *MCPServer) RegisterResources() {
 }
 
 func (s *MCPServer) handleReadCore(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-	log.Printf("[MCP] Handling Resource Read: %s", request.Params.URI)
+	slog.Debug("reading resource", "uri", request.Params.URI)
 	shards, err := s.vessel.GetCoreShards(ctx)
 	if err != nil {
-		log.Printf("[MCP ERROR] GetCoreShards failed: %v", err)
+		slog.Error("GetCoreShards failed", "error", err)
 		return nil, err
 	}
 
@@ -427,11 +437,14 @@ func (s *MCPServer) handleReadCore(ctx context.Context, request mcp.ReadResource
 }
 
 func (s *MCPServer) handleSearch(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	start := time.Now()
+	metrics.SearchMemoryTotal.Add(1)
+
 	vecStr := request.GetString("query_vector", "")
 	text := request.GetString("query_text", "")
 	limit := int(request.GetFloat("limit", 5))
 
-	log.Printf("[MCP] Calling Tool: search_memory (text_len=%d, limit=%d)", len(text), limit)
+	slog.Info("search_memory called", "text_len", len(text), "limit", limit)
 
 	// 2.3 — Limit validation
 	if len(text) > maxQueryLen {
@@ -463,7 +476,7 @@ func (s *MCPServer) handleSearch(ctx context.Context, request mcp.CallToolReques
 
 	results, err := s.vessel.FindResonant(ctx, queryVec, limit, true)
 	if err != nil {
-		log.Printf("[MCP ERROR] search_memory failed: %v", err)
+		slog.Error("search_memory failed", "error", err)
 		return nil, err
 	}
 
@@ -484,14 +497,18 @@ func (s *MCPServer) handleSearch(ctx context.Context, request mcp.CallToolReques
 		response += fmt.Sprintf("[%s]: %s\n---\n", shard.ID, shard.Content)
 	}
 
+	metrics.SearchMemoryLatency.Observe(time.Since(start))
 	return mcp.NewToolResultText(response), nil
 }
 
 func (s *MCPServer) handleSearchText(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	start := time.Now()
+	metrics.SearchTextTotal.Add(1)
+
 	query := request.GetString("query", "")
 	limit := int(request.GetFloat("limit", 5))
 
-	log.Printf("[MCP] Calling Tool: search_text (query_len=%d, limit=%d)", len(query), limit)
+	slog.Info("search_text called", "query_len", len(query), "limit", limit)
 
 	// 2.3 — Limit validation
 	if len(query) > maxQueryLen {
@@ -503,7 +520,7 @@ func (s *MCPServer) handleSearchText(ctx context.Context, request mcp.CallToolRe
 
 	results, err := s.vessel.FindText(ctx, query, limit, true)
 	if err != nil {
-		log.Printf("[MCP ERROR] search_text failed: %v", err)
+		slog.Error("search_text failed", "error", err)
 		return nil, err
 	}
 
@@ -519,11 +536,12 @@ func (s *MCPServer) handleSearchText(ctx context.Context, request mcp.CallToolRe
 		}
 	}
 
+	metrics.SearchTextLatency.Observe(time.Since(start))
 	return mcp.NewToolResultText(response), nil
 }
 
 func (s *MCPServer) RegisterPrompts() {
-	log.Println("[MCP] Registering Prompt: hub_search")
+	slog.Debug("registering prompt", "name", "hub_search")
 	shardPrompt := mcp.NewPrompt("hub_search",
 		mcp.WithPromptDescription("Global search across Shard-Link memory (Neo4j Mesh). Uses the 'search_all' meta-tool for maximum context."),
 		mcp.WithArgument("query", mcp.ArgumentDescription("Keyword or topic to search for"), mcp.RequiredArgument()),
@@ -533,7 +551,7 @@ func (s *MCPServer) RegisterPrompts() {
 
 func (s *MCPServer) handleShardPrompt(ctx context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 	query := request.Params.Arguments["query"]
-	log.Printf("[MCP] Handling Prompt Request: hub_search (query_len=%d)", len(query))
+	slog.Debug("prompt request", "name", "hub_search", "query_len", len(query))
 	
 	message := mcp.NewPromptMessage(mcp.RoleUser, mcp.NewTextContent(
 		fmt.Sprintf("Please use the 'search_all' tool to find all relevant shards and graph relationships for the topic: '%s'. Provide a high-signal summary of what you find.", query),
@@ -570,7 +588,7 @@ var pendingCodes = struct {
 func (s *MCPServer) handleOAuthMetadata(baseURL string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		setSecurityHeaders(w)
-		log.Printf("[OAuth] Metadata discovery from %s", r.RemoteAddr)
+		slog.Debug("OAuth metadata discovery", "remote", r.RemoteAddr)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"issuer":                                baseURL,
@@ -601,7 +619,7 @@ func (s *MCPServer) handleOAuthAuthorize() http.HandlerFunc {
 		redirectURI := r.URL.Query().Get("redirect_uri")
 		state := r.URL.Query().Get("state")
 
-		log.Printf("[OAuth] Authorize request: method=%s from %s", method, r.RemoteAddr)
+		slog.Info("OAuth authorize request", "method", method, "remote", r.RemoteAddr)
 
 		if redirectURI == "" || challenge == "" {
 			http.Error(w, "Missing redirect_uri or code_challenge", http.StatusBadRequest)
@@ -612,7 +630,7 @@ func (s *MCPServer) handleOAuthAuthorize() http.HandlerFunc {
 		// Only HTTPS to trusted hosts is allowed.
 		parsed, err := url.Parse(redirectURI)
 		if err != nil || parsed.Scheme != "https" || !validRedirectHosts[parsed.Hostname()] {
-			log.Printf("[OAuth] Rejected redirect_uri: %s", redirectURI)
+			slog.Warn("OAuth rejected redirect_uri", "uri", redirectURI)
 			http.Error(w, "Invalid redirect_uri: host not in allowlist", http.StatusBadRequest)
 			return
 		}
@@ -679,7 +697,7 @@ func (s *MCPServer) handleOAuthToken() http.HandlerFunc {
 		code := r.FormValue("code")
 		verifier := r.FormValue("code_verifier")
 
-		log.Printf("[OAuth] Token request: grant_type=%s from %s", grantType, r.RemoteAddr)
+		slog.Info("OAuth token request", "grant_type", grantType, "remote", r.RemoteAddr)
 
 		if grantType != "authorization_code" {
 			w.Header().Set("Content-Type", "application/json")
@@ -726,7 +744,7 @@ func (s *MCPServer) handleOAuthToken() http.HandlerFunc {
 		h := sha256.Sum256([]byte(verifier))
 		computed := base64.RawURLEncoding.EncodeToString(h[:])
 		if subtle.ConstantTimeCompare([]byte(computed), []byte(pending.challenge)) != 1 {
-			log.Printf("[OAuth] PKCE verification failed from %s", r.RemoteAddr)
+			slog.Warn("OAuth PKCE verification failed", "remote", r.RemoteAddr)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]string{
@@ -750,7 +768,7 @@ func (s *MCPServer) handleOAuthToken() http.HandlerFunc {
 		s.sessionTokens[sessionToken] = expiry
 		s.sessionTokensMu.Unlock()
 
-		log.Printf("[OAuth] Ephemeral token issued to %s (expires: %s)", r.RemoteAddr, expiry.Format(time.RFC3339))
+		slog.Info("OAuth ephemeral token issued", "remote", r.RemoteAddr, "expires", expiry.Format(time.RFC3339))
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"access_token": sessionToken,
@@ -763,34 +781,39 @@ func (s *MCPServer) handleOAuthToken() http.HandlerFunc {
 // StartHub ignites the multi-protocol MCP bridge.
 // Primary transport: Streamable HTTP on /mcp (MCP spec 2024-11-05).
 // Legacy transport:  Standard SSE on /sse + /message (kept for backward compat).
-func (s *MCPServer) StartHub(port int, baseURL string) error {
-	log.Printf("[MCP] Starting Hub on :%d | Streamable-HTTP → /mcp | SSE → /sse (baseURL: %s)", port, baseURL)
+func (s *MCPServer) StartHub(ctx context.Context, port int, baseURL string) error {
+	slog.Info("starting MCP hub", "port", port, "base_url", baseURL)
 
 	// 1.6 — Background cleanup: purge expired auth codes and session tokens every minute.
 	// Without this, expired entries accumulate forever (memory leak under sustained use).
 	go func() {
 		ticker := time.NewTicker(1 * time.Minute)
 		defer ticker.Stop()
-		for range ticker.C {
-			now := time.Now()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				now := time.Now()
 
-			// Clean expired pending authorization codes
-			pendingCodes.Lock()
-			for code, ac := range pendingCodes.codes {
-				if now.After(ac.expiresAt) {
-					delete(pendingCodes.codes, code)
+				// Clean expired pending authorization codes
+				pendingCodes.Lock()
+				for code, ac := range pendingCodes.codes {
+					if now.After(ac.expiresAt) {
+						delete(pendingCodes.codes, code)
+					}
 				}
-			}
-			pendingCodes.Unlock()
+				pendingCodes.Unlock()
 
-			// Clean expired session tokens
-			s.sessionTokensMu.Lock()
-			for token, expiry := range s.sessionTokens {
-				if now.After(expiry) {
-					delete(s.sessionTokens, token)
+				// Clean expired session tokens
+				s.sessionTokensMu.Lock()
+				for token, expiry := range s.sessionTokens {
+					if now.After(expiry) {
+						delete(s.sessionTokens, token)
+					}
 				}
+				s.sessionTokensMu.Unlock()
 			}
-			s.sessionTokensMu.Unlock()
 		}
 	}()
 
@@ -820,8 +843,21 @@ func (s *MCPServer) StartHub(port int, baseURL string) error {
 	mux.Handle("/sse", s.withAuth(sseSrv.SSEHandler()))
 	mux.Handle("/message", s.withAuth(sseSrv.MessageHandler()))
 
-	log.Printf("[MCP] Hub ignited on :%d — Primary: Streamable HTTP (/mcp) | Legacy: SSE (/sse)\n", port)
-	return http.ListenAndServe(fmt.Sprintf(":%d", port), mux)
+	s.httpServer = &http.Server{
+		Addr:    fmt.Sprintf(":%d", port),
+		Handler: mux,
+	}
+
+	slog.Info("hub ignited", "port", port, "primary", "/mcp", "legacy", "/sse")
+	return s.httpServer.ListenAndServe()
+}
+
+// Shutdown gracefully drains in-flight HTTP requests within the given context deadline.
+func (s *MCPServer) Shutdown(ctx context.Context) error {
+	if s.httpServer == nil {
+		return nil
+	}
+	return s.httpServer.Shutdown(ctx)
 }
 
 // --- Working Memory Helpers ---
@@ -864,9 +900,8 @@ func (s *MCPServer) updateCentroidSlice(ctx context.Context, shards []storage.Sh
 }
 
 // allowedCategories restricts which categories MCP callers can assign.
-// "core" is excluded — core shards are identity anchors that bypass eviction,
-// so they must only be created via admin/manual operations.
 var allowedCategories = map[string]bool{
+	"core":    true,
 	"memory":  true,
 	"session": true,
 	"tech":    true,
@@ -884,16 +919,18 @@ const (
 )
 
 func (s *MCPServer) handleSave(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	metrics.SaveMemoryTotal.Add(1)
+
 	id := request.GetString("id", "")
 	content := request.GetString("content", "")
 	category := request.GetString("category", "memory")
 	vecStr := request.GetString("vector", "")
 
-	log.Printf("[MCP] Calling Tool: save_memory (id=%s, content_len=%d, category=%s)", id, len(content), category)
+	slog.Info("save_memory called", "id", id, "content_len", len(content), "category", category)
 
 	// 2.1 — Category whitelist: reject "core" from MCP callers
 	if !allowedCategories[category] {
-		return mcp.NewToolResultError(fmt.Sprintf("Category %q is not allowed via MCP. Allowed: memory, session, tech, arch", category)), nil
+		return mcp.NewToolResultError(fmt.Sprintf("Category %q is not allowed via MCP. Allowed: core, memory, session, tech, arch", category)), nil
 	}
 
 	// 2.2 — Content size limits
@@ -938,7 +975,7 @@ func (s *MCPServer) handleSave(ctx context.Context, request mcp.CallToolRequest)
 			}
 		}
 	}
-	log.Printf("[MCP] Salience scored: %.2f for shard %s", salience, id)
+	slog.Info("salience scored", "salience", salience, "shard_id", id)
 
 	now := time.Now()
 	shard := storage.Shard{
@@ -952,7 +989,7 @@ func (s *MCPServer) handleSave(ctx context.Context, request mcp.CallToolRequest)
 	}
 
 	if err := s.vessel.SaveShard(ctx, shard); err != nil {
-		log.Printf("[MCP ERROR] save_memory failed: %v", err)
+		slog.Error("save_memory failed", "error", err)
 		return nil, err
 	}
 
@@ -971,7 +1008,7 @@ func (s *MCPServer) handleSave(ctx context.Context, request mcp.CallToolRequest)
 			_, _ = vg.ExecuteQuery(ctx, episodeQuery, map[string]any{
 				"sessionID": sessID, "shardID": id,
 			})
-			log.Printf("[MCP] Shard %s linked to episode %s", id, sessID)
+			slog.Debug("shard linked to episode", "shard_id", id, "session_id", sessID)
 		}
 	}
 

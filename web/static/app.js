@@ -811,10 +811,49 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
+// --- Survival Distribution Panel ---
+
+async function loadHealthDistribution() {
+    try {
+        const resp = await fetch('/api/health');
+        if (!resp.ok) return;
+        const sb = await resp.json();
+        renderHealthPanel(sb);
+    } catch (err) { /* silent — non-critical */ }
+}
+
+function renderHealthPanel(sb) {
+    const panel = document.getElementById('health-bars');
+    if (!panel) return;
+
+    const buckets = [
+        { label: '0-20', count: sb.le_20, color: '#ff5252' },
+        { label: '21-50', count: sb.le_50, color: '#ff9800' },
+        { label: '51-80', count: sb.le_80, color: '#ffd740' },
+        { label: '81-95', count: sb.le_95, color: '#69f0ae' },
+        { label: '96-100', count: sb.le_100, color: '#5ef3ff' },
+    ];
+
+    const maxCount = Math.max(1, ...buckets.map(b => b.count));
+    panel.innerHTML = buckets.map(b => {
+        const pct = Math.round((b.count / maxCount) * 100);
+        return `<div class="health-row">
+            <span class="health-label">${b.label}</span>
+            <div class="health-bar-bg">
+                <div class="health-bar-fill" style="width:${pct}%;background:${b.color}"></div>
+            </div>
+            <span class="health-count">${b.count}</span>
+        </div>`;
+    }).join('');
+
+    document.getElementById('health-total').textContent = sb.total;
+}
+
 // Ignite
 initViz();
 loadGraph();
 initActivityFeed();
+loadHealthDistribution();
 
 window.addEventListener('resize', () => {
     width = window.innerWidth;
@@ -851,5 +890,8 @@ window.refreshCurrentMetrics = async function() {
 
 setInterval(() => {
     if (searchActive) return; // Don't overwrite search results — user clicks RESET to exit
-    if (!document.getElementById('details').classList.contains('active') && !bondMode && !focusMode) loadGraph();
+    if (!document.getElementById('details').classList.contains('active') && !bondMode && !focusMode) {
+        loadGraph();
+        loadHealthDistribution();
+    }
 }, 15000);

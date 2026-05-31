@@ -2,8 +2,7 @@ package hygiene
 
 import (
 	"context"
-	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/izenberk/shard-link/internal/storage"
@@ -40,14 +39,14 @@ func (h *HygieneWorker) logActivity(msg, category, shardID string) {
 }
 
 func (h *HygieneWorker) Run(ctx context.Context) {
-	log.Printf("[Hygiene] Service ignited. Interval: %v", h.interval)
+	slog.Info("hygiene worker started", "interval", h.interval)
 	ticker := time.NewTicker(h.interval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("[Hygiene] Shutting down...")
+			slog.Info("hygiene worker shutting down")
 			return
 		case <-ticker.C:
 			h.performHygiene(ctx)
@@ -56,39 +55,39 @@ func (h *HygieneWorker) Run(ctx context.Context) {
 }
 
 func (h *HygieneWorker) performHygiene(ctx context.Context) {
-	log.Println("[Hygiene] Starting maintenance cycle...")
+	slog.Debug("hygiene maintenance cycle starting")
 	h.logActivity("Hygiene: maintenance cycle started", "system", "")
 
 	if h.pgVessel != nil {
 		if err := h.pgVessel.Optimize(ctx); err != nil {
-			log.Printf("[Hygiene ERROR] Postgres: %v", err)
-			h.logActivity(fmt.Sprintf("Hygiene: Postgres VACUUM failed — %v", err), "error", "")
+			slog.Error("hygiene postgres optimization failed", "error", err)
+			h.logActivity("Hygiene: Postgres VACUUM failed", "error", "")
 		} else {
-			log.Println("[Hygiene] Postgres: VACUUM ANALYZE complete.")
+			slog.Debug("hygiene postgres VACUUM ANALYZE complete")
 			h.logActivity("Hygiene: Postgres VACUUM complete", "system", "")
 		}
 	}
 
 	if h.graphVessel != nil {
 		if err := h.graphVessel.Optimize(ctx); err != nil {
-			log.Printf("[Hygiene ERROR] Neo4j: %v", err)
-			h.logActivity(fmt.Sprintf("Hygiene: Neo4j optimization failed — %v", err), "error", "")
+			slog.Error("hygiene neo4j optimization failed", "error", err)
+			h.logActivity("Hygiene: Neo4j optimization failed", "error", "")
 		} else {
-			log.Println("[Hygiene] Neo4j: Index integrity verified.")
+			slog.Debug("hygiene neo4j index integrity verified")
 			h.logActivity("Hygiene: Neo4j index integrity verified", "system", "")
 		}
 	}
 
 	if h.localVessel != nil {
 		if err := h.localVessel.Optimize(ctx); err != nil {
-			log.Printf("[Hygiene ERROR] SQLite: %v", err)
-			h.logActivity(fmt.Sprintf("Hygiene: SQLite VACUUM failed — %v", err), "error", "")
+			slog.Error("hygiene sqlite optimization failed", "error", err)
+			h.logActivity("Hygiene: SQLite VACUUM failed", "error", "")
 		} else {
-			log.Println("[Hygiene] SQLite: VACUUM complete.")
+			slog.Debug("hygiene sqlite VACUUM complete")
 			h.logActivity("Hygiene: SQLite VACUUM complete", "system", "")
 		}
 	}
 
-	log.Println("[Hygiene] Maintenance cycle complete.")
+	slog.Debug("hygiene maintenance cycle complete")
 	h.logActivity("Hygiene: maintenance cycle complete", "system", "")
 }

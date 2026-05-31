@@ -3,7 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"sort"
 	"strconv"
@@ -83,7 +83,7 @@ func (v *VesselGraph) ensureIndexes(ctx context.Context) error {
 				if ic, ok := m["indexConfig"].(map[string]any); ok {
 					if existingDim, ok := ic["vector.dimensions"].(int64); ok {
 						if int(existingDim) != dim {
-							log.Printf("[VesselGraph] Vector index dimension mismatch: existing=%d, target=%d — recreating", existingDim, dim)
+							slog.Warn("vector index dimension mismatch — recreating", "existing", existingDim, "target", dim)
 							needsRecreate = true
 						}
 					}
@@ -161,7 +161,7 @@ func (v *VesselGraph) SaveShard(ctx context.Context, s Shard) error {
 			GlobalLogger(fmt.Sprintf("Shard Saved: %s", s.ID), "success", s.ID)
 		}
 	}
-	log.Printf("[Vessel] Shard Saved: %s (Category: %s)", s.ID, s.Category)
+	slog.Debug("shard saved", "id", s.ID, "category", s.Category)
 
 	// Aha! Moment: Immediate Associative Linking (Phase 11)
 	tStr := os.Getenv("MESH_LINK_THRESHOLD")
@@ -237,7 +237,7 @@ func (v *VesselGraph) ReinforceShards(ctx context.Context, ids []string) error {
 	query := `
 	MATCH (s:Shard)
 	WHERE s.id IN $ids
-	SET s.last_used = toString(datetime()),
+	SET s.last_used = datetime(),
 	    s.use_count = coalesce(s.use_count, 0) + 1,
 	    s.retrieval_history = (coalesce(s.retrieval_history, []) + [toString(datetime())])[-20..]
 	`
@@ -292,8 +292,8 @@ func (v *VesselGraph) GetEvictionCandidates(ctx context.Context, limit int) ([]s
 		score := SurvivalScoreV4(bondCount, shard.PageRank, shard.Salience, shard.RetrievalHistory, shard.LastUsed)
 		candidates = append(candidates, scoredCandidate{id: shard.ID, score: score})
 
-		log.Printf("[Janitor] Candidate %s — survival=%.2f (bonds=%d, pagerank=%.4f, salience=%.2f)",
-			shard.ID, score, bondCount, shard.PageRank, shard.Salience)
+		slog.Debug("eviction candidate scored",
+			"id", shard.ID, "survival", score, "bonds", bondCount, "pagerank", shard.PageRank, "salience", shard.Salience)
 	}
 
 	// Sort ascending — lowest survival scores get evicted first
@@ -398,9 +398,9 @@ func (v *VesselGraph) CalculateCommunities(ctx context.Context) (int, []int64, e
 			map[string]any{"updates": updates},
 			neo4j.EagerResultTransformer,
 			neo4j.ExecuteQueryWithDatabase(v.dbName))
-		log.Printf("[VesselGraph] Community delta-write: %d nodes updated", len(updates))
+		slog.Debug("community delta-write complete", "nodes_updated", len(updates))
 	} else {
-		log.Println("[VesselGraph] Community delta-write: no changes — WAL untouched")
+		slog.Debug("community delta-write: no changes")
 	}
 
 	communityCacheMu.Lock()
@@ -505,6 +505,16 @@ func nodeToShard(node neo4j.Node) Shard {
 		ca, _ = time.Parse(time.RFC3339, caVal)
 	} else if caVal, ok := props["created_at"].(time.Time); ok {
 		ca = caVal
+	}
+
+	// Zero-timestamp guard: prevent 0001-01-01 from collapsing the Ebbinghaus decay denominator.
+	// If created_at is zero, fall back to now. If last_used is zero, fall back to created_at.
+	now := time.Now()
+	if ca.IsZero() || ca.Year() < 2000 {
+		ca = now
+	}
+	if lu.IsZero() || lu.Year() < 2000 {
+		lu = ca
 	}
 
 	var useCount int
@@ -614,7 +624,7 @@ func (v *VesselGraph) ArchiveShard(ctx context.Context, id string) error {
 		if GlobalLogger != nil {
 			GlobalLogger(fmt.Sprintf("Shard Evicted: %s", id), "evict", id)
 		}
-		log.Printf("[Vessel] Shard Evicted/Deleted from Mesh: %s", id)
+		slog.Info("shard evicted from mesh", "id", id)
 	}
 	return err
 }
@@ -638,7 +648,7 @@ func (v *VesselGraph) SaveBond(ctx context.Context, b ShardBond) error {
 		if GlobalLogger != nil {
 			GlobalLogger(fmt.Sprintf("Bond Forged: %s <-> %s", b.FromID, b.ToID), "bond", b.FromID)
 		}
-		log.Printf("[Vessel] Bond Forged: %s <-> %s (w: %.2f)", b.FromID, b.ToID, b.Weight)
+		slog.Debug("bond forged", "from", b.FromID, "to", b.ToID, "weight", b.Weight)
 	}
 	return err
 }

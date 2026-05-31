@@ -18,8 +18,12 @@ func MaximalMarginalRelevance(queryVector []byte, candidates []Shard, limit int,
 	if qVec == nil {
 		return candidates // Fallback if query vector is invalid
 	}
+	defer returnToPool(qVec)
 
-	// 2. Pre-decode candidate vectors and calculate base similarities
+	// 2. Pre-decode candidate vectors and calculate base similarities.
+	// We decode each candidate vector ONCE here and cache it in the candidateData struct.
+	// Before this fix, the inner loop at step 3 re-decoded selected shard vectors on every
+	// iteration — O(selected × candidates) DecodeVector calls, none returned to pool.
 	type candidateData struct {
 		shard    Shard
 		vector   []float32
@@ -27,7 +31,7 @@ func MaximalMarginalRelevance(queryVector []byte, candidates []Shard, limit int,
 		selected bool
 	}
 
-	var data []candidateData
+	data := make([]candidateData, 0, len(candidates))
 	for _, c := range candidates {
 		v := DecodeVector(c.Vector)
 		if v == nil {
@@ -41,9 +45,20 @@ func MaximalMarginalRelevance(queryVector []byte, candidates []Shard, limit int,
 		})
 	}
 
+	// Return all candidate vectors to the pool when we're done.
+	// This is safe because we only use them inside this function scope.
+	defer func() {
+		for _, d := range data {
+			returnToPool(d.vector)
+		}
+	}()
+
 	var selected []Shard
-	
-	// 3. Iteratively select the best shard using the MMR formula
+	// Track selected indices so we can look up cached vectors in step 3.
+	var selectedIdx []int
+
+	// 3. Iteratively select the best shard using the MMR formula.
+	// Key fix: use data[selectedIdx[k]].vector instead of re-decoding s.Vector.
 	for i := 0; i < limit && len(selected) < len(data); i++ {
 		bestScore := math.Inf(-1)
 		bestIdx := -1
@@ -55,13 +70,10 @@ func MaximalMarginalRelevance(queryVector []byte, candidates []Shard, limit int,
 
 			// Calculate penalty (max similarity to already selected items)
 			maxSimToSelected := 0.0
-			for _, s := range selected {
-				sVec := DecodeVector(s.Vector)
-				if sVec != nil {
-					sim := cosineSimilarity(data[j].vector, sVec)
-					if sim > maxSimToSelected {
-						maxSimToSelected = sim
-					}
+			for _, sIdx := range selectedIdx {
+				sim := cosineSimilarity(data[j].vector, data[sIdx].vector)
+				if sim > maxSimToSelected {
+					maxSimToSelected = sim
 				}
 			}
 
@@ -77,8 +89,16 @@ func MaximalMarginalRelevance(queryVector []byte, candidates []Shard, limit int,
 		if bestIdx != -1 {
 			data[bestIdx].selected = true
 			selected = append(selected, data[bestIdx].shard)
+			selectedIdx = append(selectedIdx, bestIdx)
 		}
 	}
 
 	return selected
+}
+
+// returnToPool returns a float32 slice to the vectorPool if it has the right capacity.
+func returnToPool(v []float32) {
+	if v != nil && cap(v) == vectorDimension {
+		vectorPool.Put(v[:vectorDimension])
+	}
 }

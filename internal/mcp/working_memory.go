@@ -2,7 +2,7 @@ package mcp
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -107,7 +107,7 @@ func (wm *WorkingMemory) Update(sessionID string, shards []storage.Shard) {
 			QueryCount: 1,
 			LastUsed:   time.Now(),
 		}
-		log.Printf("[MCP] Working Memory: session %s centroid seeded (1 query)", sessionID)
+		slog.Debug("working memory centroid seeded", "session_id", sessionID)
 		return
 	}
 
@@ -124,7 +124,7 @@ func (wm *WorkingMemory) Update(sessionID string, shards []storage.Shard) {
 
 	sc.QueryCount++
 	sc.LastUsed = time.Now()
-	log.Printf("[MCP] Working Memory: session %s centroid updated (%d queries)", sessionID, sc.QueryCount)
+	slog.Debug("working memory centroid updated", "session_id", sessionID, "query_count", sc.QueryCount)
 }
 
 // StartCleanup launches a background goroutine that sweeps expired sessions every 5 minutes.
@@ -151,7 +151,7 @@ func (wm *WorkingMemory) StartCleanup(ctx context.Context) {
 				wm.mu.Unlock()
 
 				if cleaned > 0 {
-					log.Printf("[WorkingMemory] Cleaned %d expired sessions", cleaned)
+					slog.Info("working memory cleanup", "expired_sessions", cleaned)
 				}
 			}
 		}
