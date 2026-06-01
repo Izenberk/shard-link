@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -156,7 +157,9 @@ func (v *VesselGraph) SaveShard(ctx context.Context, s Shard) error {
 	_, err := neo4j.ExecuteQuery(ctx, v.driver, query, params, neo4j.EagerResultTransformer,
 		neo4j.ExecuteQueryWithDatabase(v.dbName))
 	if err == nil {
-		MarkMeshDirty()
+		if !strings.HasPrefix(s.ID, "comm-summary-") {
+			MarkMeshDirty()
+		}
 		if GlobalLogger != nil {
 			GlobalLogger(fmt.Sprintf("Shard Saved: %s", s.ID), "success", s.ID)
 		}
@@ -317,9 +320,10 @@ func (v *VesselGraph) GetEvictionCandidates(ctx context.Context, limit int) ([]s
 func (v *VesselGraph) CalculateCommunities(ctx context.Context) (int, []int64, error) {
 	const cleanupQuery = `CALL gds.graph.drop('communityGraph', false)`
 	const projectQuery = `
-	CALL gds.graph.project('communityGraph', 'Shard', 'CONNECTED_TO', {
-		relationshipProperties: 'weight'
-	}) YIELD graphName`
+	CALL gds.graph.project.cypher('communityGraph',
+		'MATCH (s:Shard) WHERE NOT s.id STARTS WITH "comm-summary-" RETURN id(s) AS id',
+		'MATCH (a:Shard)-[r:CONNECTED_TO]->(b:Shard) WHERE NOT a.id STARTS WITH "comm-summary-" AND NOT b.id STARTS WITH "comm-summary-" RETURN id(a) AS source, id(b) AS target, r.weight AS weight'
+	) YIELD graphName`
 	const louvainQuery = `
 	CALL gds.louvain.stream('communityGraph')
 	YIELD nodeId, communityId
