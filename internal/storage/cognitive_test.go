@@ -23,13 +23,13 @@ func TestSurvivalScoreV4(t *testing.T) {
 		wantMax  float64
 	}{
 		{
-			name:     "zero bonds orphan is near zero",
+			name:     "zero bonds orphan gets cold-start floor (density floored to 1)",
 			density:  0,
 			central:  0.0,
 			salience: 0.5,
 			lastUsed: now.Add(-24 * time.Hour),
-			wantMin:  0.0,
-			wantMax:  0.01, // numerator is 0 (density=0), so score = 0
+			wantMin:  0.1,  // density floored to 1 → non-zero numerator
+			wantMax:  10.0, // still modest — only salience and centrality contribute
 		},
 		{
 			name:     "result never exceeds 95 for non-core",

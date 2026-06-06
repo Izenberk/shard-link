@@ -61,6 +61,11 @@ func SalToStability(salience float64) float64 {
 //   - A(m) = ACT-R activation — multiplies stability so retrieved shards decay slower
 //   - Δt_days = time since last use in days
 //
+// v4.1 → v4.2 changes:
+//  4. Floor density at 1 — prevents cold-start zero-score for freshly saved,
+//     unbonded shards. Without this, a shard saved right before a Janitor cycle
+//     could be evicted before The Synthesizer has a chance to bond it.
+//
 // v4.0 → v4.1 changes:
 //  1. Replaced fixed τ=168h with S_base(Sal) — salience now directly controls
 //     the decay window instead of only scaling the numerator.
@@ -92,7 +97,15 @@ func SurvivalScoreV4(density int, centrality, salience float64, history []time.T
 		daysSince = 1.0 / 24.0 // Floor at 1 hour
 	}
 
-	numerator := float64(density) * (centrality + 1.0) * 10.0 * salience
+	// Guard: floor density at 1 so unbonded shards still get a non-zero score
+	// from their salience, centrality, and recency. Prevents the cold-start race
+	// where The Janitor evicts a freshly saved shard before The Synthesizer bonds it.
+	d := density
+	if d < 1 {
+		d = 1
+	}
+
+	numerator := float64(d) * (centrality + 1.0) * 10.0 * salience
 	denominator := math.Exp(daysSince / s0)
 
 	score := numerator / denominator
