@@ -37,6 +37,7 @@ type MCPServer struct {
 	embedder    storage.Embedder
 	summarizer  storage.Summarizer
 	wm          *WorkingMemory
+	ledger      *storage.Vessel // Activity Ledger (SQLite) for persistent logging
 	httpServer  *http.Server
 
 	// Ephemeral session tokens — OAuth clients get these instead of the raw API key.
@@ -45,7 +46,7 @@ type MCPServer struct {
 	sessionTokensMu sync.RWMutex
 }
 
-func NewMCPServer(v storage.Repository, apiKey string, e storage.Embedder, sum storage.Summarizer, ctx context.Context) *MCPServer {
+func NewMCPServer(v storage.Repository, apiKey string, e storage.Embedder, sum storage.Summarizer, ledger *storage.Vessel, ctx context.Context) *MCPServer {
 	slog.Info("initializing MCP server")
 
 	// 1. Create the base MCP server
@@ -67,6 +68,7 @@ func NewMCPServer(v storage.Repository, apiKey string, e storage.Embedder, sum s
 		embedder:      e,
 		summarizer:    sum,
 		wm:            wm,
+		ledger:        ledger,
 		sessionTokens: make(map[string]time.Time),
 	}
 
@@ -991,6 +993,15 @@ func (s *MCPServer) handleSave(ctx context.Context, request mcp.CallToolRequest)
 	if err := s.vessel.SaveShard(ctx, shard); err != nil {
 		slog.Error("save_memory failed", "error", err)
 		return nil, err
+	}
+
+	// Log to Activity Ledger
+	if s.ledger != nil {
+		_ = s.ledger.SaveActivity(ctx, storage.ShardActivity{
+			Type:    "save",
+			Message: fmt.Sprintf("Saved shard [%s] (category=%s, salience=%.2f)", id, category, salience),
+			ShardID: id,
+		})
 	}
 
 	// Episodic Session Chain: Link shard to its MCP session Episode node
