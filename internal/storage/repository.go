@@ -20,6 +20,8 @@ type Repository interface {
 	// Bonds & Relationships
 	SaveBond(ctx context.Context, b ShardBond) error
 	GetAllBonds(ctx context.Context) ([]ShardBond, error)
+	GetBondCount(ctx context.Context) (int, error)
+	GetCommunityCount(ctx context.Context) (int, error)
 
 	// Mesh Intelligence
 	SearchGraph(ctx context.Context, queryVector []byte, limit int, shouldTouch bool) ([]Shard, []ShardBond, error)

@@ -38,6 +38,23 @@ func NewPostgresVessel(ctx context.Context, connStr string) (*PostgresVessel, er
 	return &PostgresVessel{pool: pool}, nil
 }
 
+// Ping verifies Postgres connectivity for health checks.
+func (v *PostgresVessel) Ping(ctx context.Context) error {
+	return v.pool.Ping(ctx)
+}
+
+// GetBondCount returns the total number of bonds in the shard_bonds table.
+func (v *PostgresVessel) GetBondCount(ctx context.Context) (int, error) {
+	var count int
+	err := v.pool.QueryRow(ctx, "SELECT COUNT(*) FROM shard_bonds").Scan(&count)
+	return count, err
+}
+
+// GetCommunityCount returns 0 — Postgres does not run Louvain community detection.
+func (v *PostgresVessel) GetCommunityCount(ctx context.Context) (int, error) {
+	return 0, nil
+}
+
 func (v *PostgresVessel) Close() error {
 	v.pool.Close()
 	return nil

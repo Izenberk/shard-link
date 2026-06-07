@@ -602,6 +602,35 @@ func nodeToShardWithCache(node neo4j.Node) Shard {
 	return s
 }
 
+// Ping verifies Neo4j connectivity for health checks.
+func (v *VesselGraph) Ping(ctx context.Context) error {
+	return v.driver.VerifyConnectivity(ctx)
+}
+
+// GetBondCount returns the total number of CONNECTED_TO relationships in the mesh.
+func (v *VesselGraph) GetBondCount(ctx context.Context) (int, error) {
+	query := "MATCH ()-[r:CONNECTED_TO]->() RETURN count(r) AS count"
+	res, err := neo4j.ExecuteQuery(ctx, v.driver, query, nil, neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithDatabase(v.dbName))
+	if err != nil {
+		return 0, err
+	}
+	count, _ := res.Records[0].Get("count")
+	return int(count.(int64)), nil
+}
+
+// GetCommunityCount returns the number of distinct communities assigned by the Synthesizer.
+func (v *VesselGraph) GetCommunityCount(ctx context.Context) (int, error) {
+	query := "MATCH (s:Shard) WHERE s.community IS NOT NULL RETURN count(DISTINCT s.community) AS count"
+	res, err := neo4j.ExecuteQuery(ctx, v.driver, query, nil, neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithDatabase(v.dbName))
+	if err != nil {
+		return 0, err
+	}
+	count, _ := res.Records[0].Get("count")
+	return int(count.(int64)), nil
+}
+
 // Implement the rest of the interface (GetAllShards, GetCount, Close, etc.) to satisfy Repository
 func (v *VesselGraph) Close() error {
 	return v.driver.Close(context.Background())

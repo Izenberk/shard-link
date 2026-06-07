@@ -220,7 +220,7 @@ func main() {
 	}()
 
 	// 6. Launch the Authenticated Bridge
-	srv := mcp.NewMCPServer(v, apiKey, emb, sum, lv, ctx)
+	srv := mcp.NewMCPServer(v, apiKey, emb, sum, lv, av, ctx)
 
 	publicURL := os.Getenv("PUBLIC_URL")
 	if publicURL == "" {

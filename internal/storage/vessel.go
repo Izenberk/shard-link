@@ -709,6 +709,25 @@ func (v *Vessel) GetRecentActivity(ctx context.Context, limit int) ([]ShardActiv
 	return logs, stmt.Err()
 }
 
+// GetBondCount returns the total number of bonds in the shard_bonds table.
+func (v *Vessel) GetBondCount(ctx context.Context) (int, error) {
+	stmt, _, err := v.conn.Prepare("SELECT COUNT(*) FROM shard_bonds")
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+
+	if stmt.Step() {
+		return stmt.ColumnInt(0), nil
+	}
+	return 0, stmt.Err()
+}
+
+// GetCommunityCount returns 0 — SQLite does not run Louvain community detection.
+func (v *Vessel) GetCommunityCount(ctx context.Context) (int, error) {
+	return 0, nil
+}
+
 func (v *Vessel) CalculateCommunities(ctx context.Context) (int, []int64, error) {
 	return 0, nil, nil
 }

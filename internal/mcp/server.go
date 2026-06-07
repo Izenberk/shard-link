@@ -32,6 +32,7 @@ var validRedirectHosts = map[string]bool{
 
 type MCPServer struct {
 	vessel      storage.Repository
+	pgVessel    *storage.PostgresVessel // Archival engine — pinged independently for health checks
 	mcp         *server.MCPServer
 	apiKey      string
 	embedder    storage.Embedder
@@ -46,7 +47,7 @@ type MCPServer struct {
 	sessionTokensMu sync.RWMutex
 }
 
-func NewMCPServer(v storage.Repository, apiKey string, e storage.Embedder, sum storage.Summarizer, ledger *storage.Vessel, ctx context.Context) *MCPServer {
+func NewMCPServer(v storage.Repository, apiKey string, e storage.Embedder, sum storage.Summarizer, ledger *storage.Vessel, pg *storage.PostgresVessel, ctx context.Context) *MCPServer {
 	slog.Info("initializing MCP server")
 
 	// 1. Create the base MCP server
@@ -63,6 +64,7 @@ func NewMCPServer(v storage.Repository, apiKey string, e storage.Embedder, sum s
 
 	mcpSrv := &MCPServer{
 		vessel:        v,
+		pgVessel:      pg,
 		mcp:           s,
 		apiKey:        apiKey,
 		embedder:      e,
@@ -232,6 +234,12 @@ func (s *MCPServer) RegisterTools() {
 		mcp.WithNumber("bias", mcp.Description("Cognitive bias strength (0.0=pure centroid, 1.0=pure query). Default from COGNITIVE_BIAS_LAMBDA env or 0.7")),
 	)
 	s.mcp.AddTool(searchAllTool, s.handleSearchAll)
+
+	slog.Debug("registering tool", "name", "get_status")
+	statusTool := mcp.NewTool("get_status",
+		mcp.WithDescription("Returns mesh statistics and service health for Shard-Link hub"),
+	)
+	s.mcp.AddTool(statusTool, s.handleGetStatus)
 }
 
 func (s *MCPServer) handleSearchAll(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -345,6 +353,55 @@ func (s *MCPServer) handleSearchAll(ctx context.Context, request mcp.CallToolReq
 
 	metrics.SearchAllLatency.Observe(time.Since(start))
 	return mcp.NewToolResultText(response), nil
+}
+
+func (s *MCPServer) handleGetStatus(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	slog.Info("get_status called")
+
+	// --- Mesh Stats ---
+	shardCount, _ := s.vessel.GetCount(ctx)
+	bondCount, _ := s.vessel.GetBondCount(ctx)
+	communityCount, _ := s.vessel.GetCommunityCount(ctx)
+
+	// --- Service Health ---
+	// Hub: always online (if you're reading this response, the hub is alive)
+	hubStatus := "online"
+
+	// Neo4j: type-assert to VesselGraph and ping
+	neo4jStatus := "offline"
+	if vg, ok := s.vessel.(*storage.VesselGraph); ok {
+		if err := vg.Ping(ctx); err == nil {
+			neo4jStatus = "online"
+		}
+	}
+
+	// Postgres: ping the archival vessel if wired
+	pgStatus := "offline"
+	if s.pgVessel != nil {
+		if err := s.pgVessel.Ping(ctx); err == nil {
+			pgStatus = "online"
+		}
+	}
+
+	status := map[string]any{
+		"mesh": map[string]int{
+			"shards":      shardCount,
+			"bonds":       bondCount,
+			"communities": communityCount,
+		},
+		"services": map[string]string{
+			"hub":      hubStatus,
+			"neo4j":    neo4jStatus,
+			"postgres": pgStatus,
+		},
+	}
+
+	payload, err := json.Marshal(status)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to marshal status: %v", err)), nil
+	}
+
+	return mcp.NewToolResultText(string(payload)), nil
 }
 
 func (s *MCPServer) handleSearchGraph(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
