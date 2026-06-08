@@ -240,6 +240,19 @@ func (s *MCPServer) RegisterTools() {
 		mcp.WithDescription("Returns mesh statistics and service health for Shard-Link hub"),
 	)
 	s.mcp.AddTool(statusTool, s.handleGetStatus)
+
+	slog.Debug("registering tool", "name", "get_shard")
+	getShardTool := mcp.NewTool("get_shard",
+		mcp.WithDescription("Fetch a single memory shard by its exact ID"),
+		mcp.WithString("id", mcp.Description("The exact shard ID to retrieve"), mcp.Required()),
+	)
+	s.mcp.AddTool(getShardTool, s.handleGetShard)
+
+	slog.Debug("registering tool", "name", "get_core_shards")
+	getCoreShardsTool := mcp.NewTool("get_core_shards",
+		mcp.WithDescription("Fetch all core identity shards"),
+	)
+	s.mcp.AddTool(getCoreShardsTool, s.handleGetCoreShards)
 }
 
 func (s *MCPServer) handleSearchAll(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -399,6 +412,67 @@ func (s *MCPServer) handleGetStatus(ctx context.Context, request mcp.CallToolReq
 	payload, err := json.Marshal(status)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Failed to marshal status: %v", err)), nil
+	}
+
+	return mcp.NewToolResultText(string(payload)), nil
+}
+
+// shardResponse is the JSON shape the CLI expects from get_shard and get_core_shards.
+type shardResponse struct {
+	ID        string `json:"id"`
+	Content   string `json:"content"`
+	Category  string `json:"category"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+func toShardResponse(sh storage.Shard) shardResponse {
+	return shardResponse{
+		ID:        sh.ID,
+		Content:   sh.Content,
+		Category:  sh.Category,
+		CreatedAt: sh.CreatedAt.Format(time.RFC3339),
+		UpdatedAt: sh.LastUsed.Format(time.RFC3339),
+	}
+}
+
+func (s *MCPServer) handleGetShard(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	id := request.GetString("id", "")
+	slog.Info("get_shard called", "id", id)
+
+	if id == "" {
+		return mcp.NewToolResultError("id is required"), nil
+	}
+
+	shard, err := s.vessel.GetShardByID(ctx, id)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("shard not found: %s", id)), nil
+	}
+
+	payload, err := json.Marshal(toShardResponse(shard))
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal shard: %v", err)), nil
+	}
+
+	return mcp.NewToolResultText(string(payload)), nil
+}
+
+func (s *MCPServer) handleGetCoreShards(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	slog.Info("get_core_shards called")
+
+	shards, err := s.vessel.GetCoreShards(ctx)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to fetch core shards: %v", err)), nil
+	}
+
+	responses := make([]shardResponse, len(shards))
+	for i, sh := range shards {
+		responses[i] = toShardResponse(sh)
+	}
+
+	payload, err := json.Marshal(responses)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal core shards: %v", err)), nil
 	}
 
 	return mcp.NewToolResultText(string(payload)), nil
