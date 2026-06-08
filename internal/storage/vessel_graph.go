@@ -1017,6 +1017,37 @@ func (v *VesselGraph) FindOrphanShards(ctx context.Context) ([]string, error) {
 	return ids, nil
 }
 
+// GetSurvivalDistribution returns bucketed counts of shards by age.
+func (v *VesselGraph) GetSurvivalDistribution(ctx context.Context) (map[string]int, error) {
+	query := `
+	MATCH (s:Shard)
+	WHERE s.created_at IS NOT NULL
+	WITH s, duration.between(datetime(s.created_at), datetime()).days AS ageDays
+	RETURN
+		CASE
+			WHEN ageDays <= 1 THEN '24h'
+			WHEN ageDays <= 7 THEN '7d'
+			WHEN ageDays <= 30 THEN '30d'
+			WHEN ageDays <= 90 THEN '90d'
+			ELSE 'older'
+		END AS bucket,
+		count(s) AS cnt
+	`
+	result, err := neo4j.ExecuteQuery(ctx, v.driver, query, nil, neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithDatabase(v.dbName))
+	if err != nil {
+		return nil, fmt.Errorf("survival distribution query failed: %w", err)
+	}
+
+	dist := map[string]int{"24h": 0, "7d": 0, "30d": 0, "90d": 0, "older": 0}
+	for _, record := range result.Records {
+		bucket, _ := record.Get("bucket")
+		cnt, _ := record.Get("cnt")
+		dist[bucket.(string)] = int(cnt.(int64))
+	}
+	return dist, nil
+}
+
 // Optimize performs Neo4j maintenance (mostly a no-op as Neo4j handles it)
 func (v *VesselGraph) Optimize(ctx context.Context) error {
 	// Neo4j handles space reclamation internally.

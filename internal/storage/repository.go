@@ -32,6 +32,9 @@ type Repository interface {
 	SyncBonds(ctx context.Context, threshold float64) (int, error)
 	ReinforceShards(ctx context.Context, ids []string) error
 
+	// Analytics
+	GetSurvivalDistribution(ctx context.Context) (map[string]int, error)
+
 	// Storage Hygiene
 	Optimize(ctx context.Context) error
 

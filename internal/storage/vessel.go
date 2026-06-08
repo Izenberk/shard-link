@@ -740,6 +740,36 @@ func (v *Vessel) GetShardsByCommunity(ctx context.Context, communityID int64) ([
 	return nil, nil
 }
 
+// GetSurvivalDistribution returns bucketed counts of shards by age.
+func (v *Vessel) GetSurvivalDistribution(ctx context.Context) (map[string]int, error) {
+	const query = `
+		SELECT
+			CASE
+				WHEN julianday('now') - julianday(created_at) <= 1 THEN '24h'
+				WHEN julianday('now') - julianday(created_at) <= 7 THEN '7d'
+				WHEN julianday('now') - julianday(created_at) <= 30 THEN '30d'
+				WHEN julianday('now') - julianday(created_at) <= 90 THEN '90d'
+				ELSE 'older'
+			END AS bucket,
+			COUNT(*) AS cnt
+		FROM shards
+		GROUP BY bucket;
+	`
+	stmt, _, err := v.conn.Prepare(query)
+	if err != nil {
+		return nil, fmt.Errorf("prepare survival distribution: %w", err)
+	}
+	defer stmt.Close()
+
+	dist := map[string]int{"24h": 0, "7d": 0, "30d": 0, "90d": 0, "older": 0}
+	for stmt.Step() {
+		bucket := stmt.ColumnText(0)
+		count := stmt.ColumnInt(1)
+		dist[bucket] = count
+	}
+	return dist, stmt.Err()
+}
+
 // Optimize runs maintenance tasks to reclaim space and update statistics
 func (v *Vessel) Optimize(ctx context.Context) error {
 	err := v.conn.Exec("PRAGMA optimize;")

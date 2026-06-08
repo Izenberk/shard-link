@@ -232,6 +232,7 @@ func (s *MCPServer) RegisterTools() {
 		mcp.WithString("query", mcp.Description("The keyword or natural language topic to search for"), mcp.Required()),
 		mcp.WithNumber("limit", mcp.Description("Max results per engine"), mcp.DefaultNumber(5)),
 		mcp.WithNumber("bias", mcp.Description("Cognitive bias strength (0.0=pure centroid, 1.0=pure query). Default from COGNITIVE_BIAS_LAMBDA env or 0.7")),
+		mcp.WithString("category", mcp.Description("Optional category filter (e.g. 'contract', 'memory', 'core'). When set, only shards matching this category are returned.")),
 	)
 	s.mcp.AddTool(searchAllTool, s.handleSearchAll)
 
@@ -334,6 +335,16 @@ func (s *MCPServer) handleSearchAll(ctx context.Context, request mcp.CallToolReq
 
 	wg.Wait()
 
+	// Post-filter by category when the caller specifies one.
+	// Applied after dedup but before reinforcement — filtered shards don't get touched.
+	if cat := request.GetString("category", ""); cat != "" {
+		for id, sh := range seenShards {
+			if sh.Category != cat {
+				delete(seenShards, id)
+			}
+		}
+	}
+
 	if len(seenShards) == 0 {
 		return mcp.NewToolResultText("No matching memory shards found across any engine."), nil
 	}
@@ -396,6 +407,13 @@ func (s *MCPServer) handleGetStatus(ctx context.Context, request mcp.CallToolReq
 		}
 	}
 
+	// --- Survival Distribution ---
+	survival, survErr := s.vessel.GetSurvivalDistribution(ctx)
+	if survErr != nil {
+		slog.Warn("survival distribution failed", "error", survErr)
+		survival = map[string]int{"24h": 0, "7d": 0, "30d": 0, "90d": 0, "older": 0}
+	}
+
 	status := map[string]any{
 		"mesh": map[string]int{
 			"shards":      shardCount,
@@ -407,6 +425,7 @@ func (s *MCPServer) handleGetStatus(ctx context.Context, request mcp.CallToolReq
 			"neo4j":    neo4jStatus,
 			"postgres": pgStatus,
 		},
+		"survival": survival,
 	}
 
 	payload, err := json.Marshal(status)

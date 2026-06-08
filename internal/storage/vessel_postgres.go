@@ -501,6 +501,39 @@ func (v *PostgresVessel) GetShardsByCommunity(ctx context.Context, communityID i
 	return nil, nil
 }
 
+// GetSurvivalDistribution returns bucketed counts of shards by age.
+func (v *PostgresVessel) GetSurvivalDistribution(ctx context.Context) (map[string]int, error) {
+	const query = `
+		SELECT
+			CASE
+				WHEN EXTRACT(EPOCH FROM NOW() - created_at) / 86400 <= 1 THEN '24h'
+				WHEN EXTRACT(EPOCH FROM NOW() - created_at) / 86400 <= 7 THEN '7d'
+				WHEN EXTRACT(EPOCH FROM NOW() - created_at) / 86400 <= 30 THEN '30d'
+				WHEN EXTRACT(EPOCH FROM NOW() - created_at) / 86400 <= 90 THEN '90d'
+				ELSE 'older'
+			END AS bucket,
+			COUNT(*) AS cnt
+		FROM shards
+		GROUP BY bucket;
+	`
+	rows, err := v.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("survival distribution query failed: %w", err)
+	}
+	defer rows.Close()
+
+	dist := map[string]int{"24h": 0, "7d": 0, "30d": 0, "90d": 0, "older": 0}
+	for rows.Next() {
+		var bucket string
+		var cnt int
+		if err := rows.Scan(&bucket, &cnt); err != nil {
+			return nil, err
+		}
+		dist[bucket] = cnt
+	}
+	return dist, rows.Err()
+}
+
 // Optimize runs Postgres-specific maintenance routines
 func (v *PostgresVessel) Optimize(ctx context.Context) error {
 	// 1. Partial Index for Core Shards
