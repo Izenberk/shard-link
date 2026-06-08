@@ -960,11 +960,12 @@ func (s *MCPServer) updateCentroidSlice(ctx context.Context, shards []storage.Sh
 
 // allowedCategories restricts which categories MCP callers can assign.
 var allowedCategories = map[string]bool{
-	"core":    true,
-	"memory":  true,
-	"session": true,
-	"tech":    true,
-	"arch":    true,
+	"core":     true,
+	"memory":   true,
+	"session":  true,
+	"tech":     true,
+	"arch":     true,
+	"contract": true,
 }
 
 // Input size limits — prevents abuse via oversized payloads that would
@@ -989,7 +990,7 @@ func (s *MCPServer) handleSave(ctx context.Context, request mcp.CallToolRequest)
 
 	// 2.1 — Category whitelist: reject "core" from MCP callers
 	if !allowedCategories[category] {
-		return mcp.NewToolResultError(fmt.Sprintf("Category %q is not allowed via MCP. Allowed: core, memory, session, tech, arch", category)), nil
+		return mcp.NewToolResultError(fmt.Sprintf("Category %q is not allowed via MCP. Allowed: core, memory, session, tech, arch, contract", category)), nil
 	}
 
 	// 2.2 — Content size limits

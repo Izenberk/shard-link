@@ -321,8 +321,8 @@ func (v *VesselGraph) CalculateCommunities(ctx context.Context) (int, []int64, e
 	const cleanupQuery = `CALL gds.graph.drop('communityGraph', false)`
 	const projectQuery = `
 	CALL gds.graph.project.cypher('communityGraph',
-		'MATCH (s:Shard) WHERE NOT s.id STARTS WITH "comm-summary-" RETURN id(s) AS id',
-		'MATCH (a:Shard)-[r:CONNECTED_TO]->(b:Shard) WHERE NOT a.id STARTS WITH "comm-summary-" AND NOT b.id STARTS WITH "comm-summary-" RETURN id(a) AS source, id(b) AS target, r.weight AS weight'
+		'MATCH (s:Shard) WHERE NOT s.id STARTS WITH "comm-summary-" AND s.category <> "contract" RETURN id(s) AS id',
+		'MATCH (a:Shard)-[r:CONNECTED_TO]->(b:Shard) WHERE NOT a.id STARTS WITH "comm-summary-" AND a.category <> "contract" AND NOT b.id STARTS WITH "comm-summary-" AND b.category <> "contract" RETURN id(a) AS source, id(b) AS target, r.weight AS weight'
 	) YIELD graphName`
 	const louvainQuery = `
 	CALL gds.louvain.stream('communityGraph')
@@ -459,6 +459,7 @@ func (v *VesselGraph) GetShardsByCommunity(ctx context.Context, communityID int6
 	query := `
 	MATCH (s:Shard {community: $communityID})
 	WHERE s.category <> 'archived'
+	  AND s.category <> 'contract'
 	  AND NOT s.id STARTS WITH 'comm-summary-'
 	RETURN s
 	ORDER BY s.pagerank DESC
