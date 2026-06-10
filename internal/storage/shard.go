@@ -6,18 +6,37 @@ import (
 	"time"
 )
 
-// meshDirty tracks whether any shard has been saved since the last Synthesizer cycle.
-// Atomic bool — zero-cost coordination between SaveShard (writer) and Synthesizer (reader).
-var meshDirty atomic.Bool
+// dirtyShardCount tracks how many shards have been saved since the last synthesis.
+// lastSynthesisNano stores the unix-nano timestamp of the last synthesis run.
+// Atomic — zero-cost coordination between SaveShard (writer) and Synthesizer (reader).
+var dirtyShardCount atomic.Int64
+var lastSynthesisNano atomic.Int64
 
-// MarkMeshDirty signals that the Knowledge Mesh has changed (new/updated shard).
-func MarkMeshDirty() { meshDirty.Store(true) }
+// Baseline the deferral clock at process start so the 24h ceiling is not
+// tripped immediately by a zero-value timestamp (time.Since(zero) is ~56 years).
+func init() {
+	lastSynthesisNano.Store(time.Now().UnixNano())
+}
 
-// IsMeshDirty returns true if any shard was saved since the last ClearMeshDirty().
-func IsMeshDirty() bool { return meshDirty.Load() }
+// MarkShardDirty increments the dirty counter (replaces the old bool MarkMeshDirty).
+func MarkShardDirty() { dirtyShardCount.Add(1) }
 
-// ClearMeshDirty resets the dirty flag after the Synthesizer processes the change.
-func ClearMeshDirty() { meshDirty.Store(false) }
+// DirtyShardCount returns the number of shards saved since the last synthesis.
+func DirtyShardCount() int64 { return dirtyShardCount.Load() }
+
+// IsMeshDirty is kept as a derived helper for any existing callers.
+func IsMeshDirty() bool { return dirtyShardCount.Load() > 0 }
+
+// ConsumeDirtyShards subtracts the observed count (NOT Store(0)) and stamps the
+// clock. Subtracting preserves any shards saved *during* a synthesis run, which
+// can take minutes for the LLM calls.
+func ConsumeDirtyShards(n int64) {
+	dirtyShardCount.Add(-n)
+	lastSynthesisNano.Store(time.Now().UnixNano())
+}
+
+// LastSynthesisTime returns the timestamp of the last synthesis run.
+func LastSynthesisTime() time.Time { return time.Unix(0, lastSynthesisNano.Load()) }
 
 // LogFunc is a callback for broadcasting system activity.
 type LogFunc func(msg string, category string, shardID string)

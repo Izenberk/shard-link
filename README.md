@@ -35,7 +35,7 @@ docker compose up -d --build
 - **Autonomous Memory (Phase 11):** Proactive link creation and mesh maintenance.
 - **Community Summaries (GraphRAG):** LLM-generated paragraph-level summaries of shard clusters, enabling multi-resolution retrieval (micro = shard, macro = community).
 - **The Janitor:** Background process for size management using the **Survival Formula (v4.1)**.
-- **The Synthesizer:** Background service that autonomously bonds resonant shards, recalculates communities (Louvain), and generates community summaries via Gemini.
+- **The Synthesizer:** Background service that autonomously bonds resonant shards, recalculates communities (Louvain), and generates community summaries via Gemini. Guarded by a **Dynamic Summarizer Gate** — defers synthesis until `SYNTHESIZER_MIN_DIRTY_SHARDS` (default 5) accumulate or `SYNTHESIZER_MAX_DEFERRAL_HOURS` (default 24h) elapse, whichever comes first.
 - **Salience:** LLM-scored importance weight [0.1, 1.0] assigned at save time — trivial shards decay faster.
 - **Episodic Sessions:** Shards saved in the same MCP session are linked to `Episode` nodes for temporal narrative recall.
 - **Silicon Activity Feed:** A real-time terminal in the dashboard providing a persistent, interactive audit trail of all system actions.
@@ -65,14 +65,17 @@ Shard-Link is built for production-grade stability across disparate environments
 
 The Synthesizer generates macro-level context for shard clusters using LLM summarization:
 
-1. **Bond Detection:** Every 10 minutes, `SyncBonds` discovers new semantic relationships (cosine similarity > threshold).
-2. **Community Detection:** Louvain clustering (Neo4j GDS) groups bonded shards into neighborhoods. A delta cache ensures only changed communities trigger work.
-3. **Summarization:** For each changed community with 2+ members, the top 15 shards (by PageRank) are sent to Gemini 2.5 Flash, which produces a cohesive paragraph summary.
-4. **Embedding & Storage:** The summary is embedded (768-D vector) and saved as a `core` shard with a deterministic ID (`comm-summary-{communityID}`). MERGE upsert ensures old summaries are overwritten when communities evolve.
+1. **Dynamic Gate:** The Synthesizer defers work until enough shards accumulate (`SYNTHESIZER_MIN_DIRTY_SHARDS`, default 5) or a max deferral window elapses (`SYNTHESIZER_MAX_DEFERRAL_HOURS`, default 24h). This prevents expensive graph + LLM work from firing on every single shard save.
+2. **Bond Detection:** Every 30 minutes (if gate passes), `SyncBonds` discovers new semantic relationships (cosine similarity > threshold).
+3. **Community Detection:** Louvain clustering (Neo4j GDS) groups bonded shards into neighborhoods. A delta cache ensures only changed communities trigger work.
+4. **Summarization:** For each changed community with 3+ members, the top 15 shards (by PageRank) are sent to Gemini 2.5 Flash Lite, which produces a cohesive paragraph summary.
+5. **Embedding & Storage:** The summary is embedded (768-D vector) and saved as a `core` shard with a deterministic ID (`comm-summary-{communityID}`). MERGE upsert ensures old summaries are overwritten when communities evolve.
+
+**Self-trigger prevention:** `comm-summary-*` shards are prefix-gated in `SaveShard()` — they do not increment the dirty counter, preventing the Synthesizer's own writes from re-arming the accumulation gate.
 
 **Feedback loop prevention:** `GetShardsByCommunity` excludes `comm-summary-*` shards from the prompt input, so summaries can never feed into their own regeneration.
 
 **Fault isolation:** Summarization runs in a detached goroutine with a separate 5-minute timeout. Gemini API failures are logged and skipped — the MCP server is never affected. Rate limiting (2s between calls) respects the Gemini free tier (15 RPM).
 
 ---
-*Status: PHASE 6.6 COMPLETE (Cognitive Science Formula v4.1 + Episodic Sessions) | Transport: Streamable HTTP (MCP 2024-11-05) | Date: 2026-05-30*
+*Status: PHASE 6.7 COMPLETE (Dynamic Summarizer Gate) | Transport: Streamable HTTP (MCP 2024-11-05) | Date: 2026-06-10*

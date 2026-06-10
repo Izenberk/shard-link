@@ -158,7 +158,7 @@ func (v *VesselGraph) SaveShard(ctx context.Context, s Shard) error {
 		neo4j.ExecuteQueryWithDatabase(v.dbName))
 	if err == nil {
 		if !strings.HasPrefix(s.ID, "comm-summary-") {
-			MarkMeshDirty()
+			MarkShardDirty()
 		}
 		if GlobalLogger != nil {
 			GlobalLogger(fmt.Sprintf("Shard Saved: %s", s.ID), "success", s.ID)

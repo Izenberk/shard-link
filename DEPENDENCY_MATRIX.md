@@ -99,7 +99,7 @@ Each card lists: what the component does, what feeds into it (upstream), what it
 |---|---|
 | **Upstream** | External clients via Cloudflare Tunnel (HTTPS) |
 | **Downstream** | Repository (all 3 backends), Embedder, Summarizer, WorkingMemory, GlobalLogger, Metrics (counters + latency) |
-| **Shared State** | `meshDirty` (write via SaveShard), `sessionTokens` + `pendingCodes` (OAuth), `GlobalLogger`, `metrics.*Total` counters, `metrics.*Latency` trackers |
+| **Shared State** | `dirtyShardCount` (write via SaveShard → MarkShardDirty), `sessionTokens` + `pendingCodes` (OAuth), `GlobalLogger`, `metrics.*Total` counters, `metrics.*Latency` trackers |
 | **Config** | `HUB_API_KEY`, `PUBLIC_URL` |
 
 **Tool Handlers:**
@@ -110,7 +110,7 @@ Each card lists: what the component does, what feeds into it (upstream), what it
 | `search_text` | FindText → WorkingMemory.Update | Yes | No embedding needed |
 | `search_graph` | Embedder.Embed → WorkingMemory.Bias → SearchGraph → WorkingMemory.Update | Yes | Multi-hop traversal, touches center + neighbors |
 | `search_all` | FindText(false) + FindResonant(false) + SearchGraph(false) → deduplicate → ReinforceShards | Yes (unified) | Avoids double-touch via dedup + single ReinforceShards call |
-| `save_memory` | Embedder.Embed → Summarizer.Summarize (salience) → SaveShard → Episode linking | N/A | Sets salience, triggers meshDirty, creates Episode node (Neo4j) |
+| `save_memory` | Embedder.Embed → Summarizer.Summarize (salience) → SaveShard → Episode linking | N/A | Sets salience, increments dirtyShardCount, creates Episode node (Neo4j) |
 
 **Resource/Prompt Handlers:**
 
@@ -217,10 +217,10 @@ Timer tick (15 min)
 
 | | |
 |---|---|
-| **Upstream** | Timer (30 min) + `meshDirty` flag (set by SaveShard), Embedder, Summarizer |
+| **Upstream** | Timer (30 min) + `dirtyShardCount` / `lastSynthesisNano` (set by SaveShard), Embedder, Summarizer |
 | **Downstream** | Repository.SyncBonds(), Repository.CalculateCommunities(), Repository.SaveShard() (community summaries), Repository.PruneStaleSummaries(), Metrics (`SynthesizerBondsCreatedTotal`, `SynthesizerSummariesTotal`) |
-| **Shared State** | `meshDirty` (read + clear), `communityCache` (written by CalculateCommunities), `GlobalLogger`, `metrics.SynthesizerBondsCreatedTotal`, `metrics.SynthesizerSummariesTotal` |
-| **Config** | `MESH_LINK_THRESHOLD` (default 0.75), `SYNTHESIZER_INTERVAL_MINUTES` (default 30) |
+| **Shared State** | `dirtyShardCount` (read + consume), `lastSynthesisNano` (read + stamp), `communityCache` (written by CalculateCommunities), `GlobalLogger`, `metrics.SynthesizerBondsCreatedTotal`, `metrics.SynthesizerSummariesTotal` |
+| **Config** | `MESH_LINK_THRESHOLD` (default 0.75), `SYNTHESIZER_INTERVAL_MINUTES` (default 30), `SYNTHESIZER_MIN_DIRTY_SHARDS` (default 5), `SYNTHESIZER_MAX_DEFERRAL_HOURS` (default 24) |
 
 **Synthesis Chain:**
 
@@ -545,7 +545,7 @@ score = lambda * sim(query, candidate) - (1 - lambda) * max(sim(candidate, alrea
 
 | Callsite | File | Notes |
 |----------|------|-------|
-| `Synthesizer.performSynthesis()` | `synthesizer.go:72` | Main async worker, guarded by `meshDirty` flag |
+| `Synthesizer.performSynthesis()` | `synthesizer.go:72` | Main async worker, guarded by `dirtyShardCount` + deferral gate |
 
 **Side effects:** Creates `CONNECTED_TO` relationships, affects `BondCount` on next load.
 
@@ -571,7 +571,8 @@ Global state that coordinates between components. When debugging race conditions
 
 | State | Type | Location | Writers | Readers | Purpose |
 |-------|------|----------|---------|---------|---------|
-| `meshDirty` | `atomic.Bool` | `shard.go` | SaveShard (VesselGraph) via `MarkMeshDirty()` | Synthesizer via `IsMeshDirty()` / `ClearMeshDirty()` | Signals mesh changed, triggers synthesis cycle |
+| `dirtyShardCount` | `atomic.Int64` | `shard.go` | SaveShard (VesselGraph) via `MarkShardDirty()`, prefix-gated for `comm-summary-*` | Synthesizer via `DirtyShardCount()` / `ConsumeDirtyShards()` | Accumulation counter; gates synthesis by magnitude |
+| `lastSynthesisNano` | `atomic.Int64` | `shard.go` | `ConsumeDirtyShards()`, `init()` | Synthesizer via `LastSynthesisTime()` | Deferral-ceiling clock |
 | `GlobalLogger` | `LogFunc` | `shard.go` | main.go (set once at startup) | Janitor, Synthesizer, HygieneWorker, VesselGraph (SaveShard, ArchiveShard) | Broadcasts system events to Activity Ledger |
 | `vectorPool` | `sync.Pool` | `vessel.go` | `DecodeVector()` (returns buffers) | `vec_distance_cosine` UDF, MMR, `isResonantToCore()` | Reduces GC pressure for 768-D float buffers |
 | `vectorDimension` | `int` | `vessel.go` | `SetVectorDimension()` in main.go (once) | Vessel pool allocation, Embedder | Controls pool buffer size |
@@ -606,6 +607,8 @@ Global state that coordinates between components. When debugging race conditions
 | `MESH_LINK_THRESHOLD` | Synthesizer, VesselGraph (SaveShard linking) | Float | `0.75` | Min cosine similarity for auto-linking |
 | `JANITOR_RESONANCE_THRESHOLD` | Janitor (GetEvictionCandidates) | Float | `0.70` | Min similarity to core for eviction protection |
 | `SYNTHESIZER_INTERVAL_MINUTES` | Synthesizer | Int | `30` | Synthesis cycle frequency |
+| `SYNTHESIZER_MIN_DIRTY_SHARDS` | Synthesizer | Int | `5` | Min shards before synthesis fires |
+| `SYNTHESIZER_MAX_DEFERRAL_HOURS` | Synthesizer | Int | `24` | Max hours before forced synthesis |
 | `HYGIENE_INTERVAL_HOURS` | HygieneWorker | Int | `24` | Maintenance cycle frequency |
 | `ACTIVITY_LOG_RETENTION_DAYS` | Vessel.SaveActivity | Int | `7` | Auto-purge activity logs older than N days |
 | `MMR_LAMBDA` | search_memory handler | Float | `0.7` | Relevance vs. diversity balance (1.0 = pure relevance) |
@@ -625,7 +628,7 @@ Client → MCP save_memory
   ├── Summarizer.Summarize(salience_prompt) → [0.1, 1.0]
   ├── Repository.SaveShard(shard)
   │   ├── Upsert to storage
-  │   ├── MarkMeshDirty() → signals Synthesizer
+  │   ├── MarkShardDirty() → increments dirtyShardCount (prefix-gated for comm-summary-*)
   │   └── [Neo4j] Immediate Associative Linking
   │       └── Auto-link to shards with cosine > MESH_LINK_THRESHOLD
   ├── [Neo4j] MERGE Episode node → link via EPISODE_OF
@@ -671,10 +674,12 @@ Janitor timer (15 min)
 
 ```
 Synthesizer timer (30 min)
-  ├── IsMeshDirty()? → skip if false
+  ├── dirty = DirtyShardCount() → skip if 0
+  ├── dirty >= minDirtyShards OR time.Since(LastSynthesisTime()) >= maxDeferral?
+  │   └── No → defer (log + return)
   ├── SyncBonds(threshold)
   │   └── [Neo4j] Match all pairs, cosine > threshold → MERGE CONNECTED_TO
-  ├── ClearMeshDirty()
+  ├── ConsumeDirtyShards(dirty) — subtract observed, stamp clock
   ├── [async, 2 min timeout]
   │   ├── CalculateCommunities()
   │   │   ├── GDS Louvain → assign CommunityID
@@ -717,7 +722,7 @@ Copy this when planning any partial upgrade:
 - [ ] Postgres — uses new behavior or correct default?
 
 ### Shared state check:
-- [ ] Any globals read/written? (meshDirty, communityCache, GlobalLogger, vectorPool)
+- [ ] Any globals read/written? (dirtyShardCount, lastSynthesisNano, communityCache, GlobalLogger, vectorPool)
 - [ ] Race condition risk? (concurrent goroutines?)
 
 ### Tests:

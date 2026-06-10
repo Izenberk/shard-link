@@ -15,12 +15,14 @@ import (
 
 // Synthesizer handles autonomous relational linking and community summarization.
 type Synthesizer struct {
-	vessel     storage.Repository
-	embedder   storage.Embedder
-	summarizer storage.Summarizer
-	interval   time.Duration
-	threshold  float64
-	logger     storage.LogFunc
+	vessel         storage.Repository
+	embedder       storage.Embedder
+	summarizer     storage.Summarizer
+	interval       time.Duration
+	threshold      float64
+	minDirtyShards int64         // Dynamic gate: min shards before synthesis fires
+	maxDeferral    time.Duration // Dynamic gate: max time before forced synthesis
+	logger         storage.LogFunc
 }
 
 func NewSynthesizer(v storage.Repository, interval time.Duration, emb storage.Embedder, sum storage.Summarizer, logger storage.LogFunc) *Synthesizer {
@@ -30,13 +32,29 @@ func NewSynthesizer(v storage.Repository, interval time.Duration, emb storage.Em
 		threshold = 0.75
 	}
 
+	minDirty := int64(5)
+	if v := os.Getenv("SYNTHESIZER_MIN_DIRTY_SHARDS"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			minDirty = n
+		}
+	}
+
+	maxDefer := 24 * time.Hour
+	if v := os.Getenv("SYNTHESIZER_MAX_DEFERRAL_HOURS"); v != "" {
+		if h, err := strconv.Atoi(v); err == nil && h > 0 {
+			maxDefer = time.Duration(h) * time.Hour
+		}
+	}
+
 	return &Synthesizer{
-		vessel:     v,
-		embedder:   emb,
-		summarizer: sum,
-		interval:   interval,
-		threshold:  threshold,
-		logger:     logger,
+		vessel:         v,
+		embedder:       emb,
+		summarizer:     sum,
+		interval:       interval,
+		threshold:      threshold,
+		minDirtyShards: minDirty,
+		maxDeferral:    maxDefer,
+		logger:         logger,
 	}
 }
 
@@ -63,15 +81,31 @@ func (s *Synthesizer) Run(ctx context.Context) {
 }
 
 func (s *Synthesizer) performSynthesis(ctx context.Context) {
-	if !storage.IsMeshDirty() {
+	dirty := storage.DirtyShardCount()
+	if dirty == 0 {
 		slog.Debug("synthesizer: mesh idle — skipping cycle")
 		return
 	}
 
-	slog.Debug("synthesizer analyzing mesh for new bonds")
+	// Dynamic gate: synthesize only when enough shards accumulated OR the
+	// deferral ceiling has been exceeded.
+	deferred := time.Since(storage.LastSynthesisTime())
+	if dirty < s.minDirtyShards && deferred < s.maxDeferral {
+		slog.Debug("synthesizer: deferring",
+			"dirty", dirty, "threshold", s.minDirtyShards,
+			"deferred", deferred.Round(time.Second))
+		return
+	}
+
+	reason := "threshold reached"
+	if dirty < s.minDirtyShards {
+		reason = "max deferral exceeded"
+	}
+	slog.Info("synthesizer: gate passed", "reason", reason,
+		"dirty", dirty, "threshold", s.minDirtyShards)
 
 	count, err := s.vessel.SyncBonds(ctx, s.threshold)
-	storage.ClearMeshDirty()
+	storage.ConsumeDirtyShards(dirty) // replaces ClearMeshDirty(), same position
 	if err != nil {
 		slog.Error("synthesizer bond sync failed", "error", err)
 		return
