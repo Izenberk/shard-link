@@ -35,6 +35,13 @@ func main() {
 		slog.Warn("HUB_API_KEY is not set — server running without authentication")
 	}
 
+	oauthClientID := os.Getenv("OAUTH_CLIENT_ID")
+	oauthClientSecret := os.Getenv("OAUTH_CLIENT_SECRET")
+	if oauthClientID == "" || oauthClientSecret == "" {
+		slog.Error("OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET are required")
+		os.Exit(1)
+	}
+
 	// 1.5 Configure Embedding Dimension (before any vessel or pool usage)
 	targetDim := 768
 	if dimStr := os.Getenv("EMBEDDING_DIMENSION"); dimStr != "" {
@@ -220,7 +227,7 @@ func main() {
 	}()
 
 	// 6. Launch the Authenticated Bridge
-	srv := mcp.NewMCPServer(v, apiKey, emb, sum, lv, av, ctx)
+	srv := mcp.NewMCPServer(v, apiKey, oauthClientID, oauthClientSecret, emb, sum, lv, av, ctx)
 
 	publicURL := os.Getenv("PUBLIC_URL")
 	if publicURL == "" {

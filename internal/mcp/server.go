@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/izenberk/shard-link/internal/metrics"
 	"github.com/izenberk/shard-link/internal/storage"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -39,15 +40,14 @@ type MCPServer struct {
 	summarizer  storage.Summarizer
 	wm          *WorkingMemory
 	ledger      *storage.Vessel // Activity Ledger (SQLite) for persistent logging
-	httpServer  *http.Server
+	httpServer *http.Server
 
-	// Ephemeral session tokens — OAuth clients get these instead of the raw API key.
-	// Key: token string, Value: expiry time.
-	sessionTokens   map[string]time.Time
-	sessionTokensMu sync.RWMutex
+	// OAuth confidential client credentials — validated at /authorize and /token
+	oauthClientID     string
+	oauthClientSecret string
 }
 
-func NewMCPServer(v storage.Repository, apiKey string, e storage.Embedder, sum storage.Summarizer, ledger *storage.Vessel, pg *storage.PostgresVessel, ctx context.Context) *MCPServer {
+func NewMCPServer(v storage.Repository, apiKey string, oauthClientID, oauthClientSecret string, e storage.Embedder, sum storage.Summarizer, ledger *storage.Vessel, pg *storage.PostgresVessel, ctx context.Context) *MCPServer {
 	slog.Info("initializing MCP server")
 
 	// 1. Create the base MCP server
@@ -63,15 +63,16 @@ func NewMCPServer(v storage.Repository, apiKey string, e storage.Embedder, sum s
 	wm.StartCleanup(ctx)
 
 	mcpSrv := &MCPServer{
-		vessel:        v,
-		pgVessel:      pg,
-		mcp:           s,
-		apiKey:        apiKey,
-		embedder:      e,
-		summarizer:    sum,
-		wm:            wm,
-		ledger:        ledger,
-		sessionTokens: make(map[string]time.Time),
+		vessel:            v,
+		pgVessel:          pg,
+		mcp:               s,
+		apiKey:            apiKey,
+		oauthClientID:     oauthClientID,
+		oauthClientSecret: oauthClientSecret,
+		embedder:          e,
+		summarizer:        sum,
+		wm:                wm,
+		ledger:            ledger,
 	}
 
 	// 2. Register tools, resources, and prompts BEFORE return
@@ -158,13 +159,9 @@ func (s *MCPServer) withAuth(next http.Handler) http.Handler {
 		// Check direct API key match first (Claude Code CLI path)
 		authorized := key == s.apiKey
 
-		// If not a direct API key match, check ephemeral session tokens (OAuth path)
+		// If not a direct API key match, validate as JWT (OAuth path)
 		if !authorized && key != "" {
-			s.sessionTokensMu.RLock()
-			if expiry, ok := s.sessionTokens[key]; ok && time.Now().Before(expiry) {
-				authorized = true
-			}
-			s.sessionTokensMu.RUnlock()
+			authorized = s.validateJWT(key)
 		}
 
 		if !authorized {
@@ -720,7 +717,34 @@ func (s *MCPServer) handleShardPrompt(ctx context.Context, request mcp.GetPrompt
 //   3. Claude.ai POSTs to /token with code + code_verifier
 //   4. /token validates PKCE and returns a Bearer token
 //
-// The Bearer token IS the HUB_API_KEY — no separate token store needed.
+// The Bearer token is a stateless JWT signed with HUB_API_KEY (HS256).
+
+// issueJWT creates an HMAC-SHA256 signed JWT with the given TTL.
+// Claims: iss=shard-link, sub=oauth-session, exp, iat.
+func (s *MCPServer) issueJWT(ttl time.Duration) (string, error) {
+	now := time.Now()
+	claims := jwt.RegisteredClaims{
+		Issuer:    "shard-link",
+		Subject:   "oauth-session",
+		IssuedAt:  jwt.NewNumericDate(now),
+		ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(s.apiKey))
+}
+
+// validateJWT parses and validates an HS256-signed JWT.
+// Guards against alg:none by enforcing HMAC method check before signature verification.
+func (s *MCPServer) validateJWT(tokenString string) bool {
+	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
+		// Prevent alg substitution attacks (e.g. alg:none)
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		}
+		return []byte(s.apiKey), nil
+	}, jwt.WithIssuer("shard-link"), jwt.WithExpirationRequired())
+	return err == nil && token.Valid
+}
 
 // authCode holds a pending authorization code with its PKCE challenge.
 type authCode struct {
@@ -749,7 +773,7 @@ func (s *MCPServer) handleOAuthMetadata(baseURL string) http.HandlerFunc {
 			"grant_types_supported":                 []string{"authorization_code"},
 			"response_types_supported":              []string{"code"},
 			"code_challenge_methods_supported":       []string{"S256"},
-			"token_endpoint_auth_methods_supported": []string{"none"},
+			"token_endpoint_auth_methods_supported": []string{"client_secret_post"},
 		})
 	}
 }
@@ -766,12 +790,20 @@ func (s *MCPServer) handleOAuthAuthorize() http.HandlerFunc {
 			return
 		}
 
+		// Validate client_id early — no point generating an auth code for an unknown client.
+		clientID := r.URL.Query().Get("client_id")
+		if clientID != s.oauthClientID {
+			slog.Warn("OAuth rejected unknown client_id", "client_id", clientID, "remote", r.RemoteAddr)
+			http.Error(w, "Invalid client_id", http.StatusUnauthorized)
+			return
+		}
+
 		challenge := r.URL.Query().Get("code_challenge")
 		method := r.URL.Query().Get("code_challenge_method")
 		redirectURI := r.URL.Query().Get("redirect_uri")
 		state := r.URL.Query().Get("state")
 
-		slog.Info("OAuth authorize request", "method", method, "remote", r.RemoteAddr)
+		slog.Info("OAuth authorize request", "client_id", clientID, "method", method, "remote", r.RemoteAddr)
 
 		if redirectURI == "" || challenge == "" {
 			http.Error(w, "Missing redirect_uri or code_challenge", http.StatusBadRequest)
@@ -845,6 +877,21 @@ func (s *MCPServer) handleOAuthToken() http.HandlerFunc {
 		}
 		r.ParseForm()
 
+		// Validate client credentials before anything else.
+		// Uses constant-time comparison to prevent timing side-channel attacks
+		// on the secret — string == short-circuits on the first differing byte.
+		clientID := r.FormValue("client_id")
+		clientSecret := r.FormValue("client_secret")
+		idMatch := subtle.ConstantTimeCompare([]byte(clientID), []byte(s.oauthClientID)) == 1
+		secretMatch := subtle.ConstantTimeCompare([]byte(clientSecret), []byte(s.oauthClientSecret)) == 1
+		if !idMatch || !secretMatch {
+			slog.Warn("OAuth invalid client credentials", "client_id", clientID, "remote", r.RemoteAddr)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]string{"error": "invalid_client"})
+			return
+		}
+
 		grantType := r.FormValue("grant_type")
 		code := r.FormValue("code")
 		verifier := r.FormValue("code_verifier")
@@ -906,21 +953,16 @@ func (s *MCPServer) handleOAuthToken() http.HandlerFunc {
 			return
 		}
 
-		// 1.2 — Generate an ephemeral session token instead of returning the raw API key.
-		// If this token leaks, only this 24hr session is compromised — not the master key.
-		tokenBytes := make([]byte, 32)
-		if _, err := rand.Read(tokenBytes); err != nil {
+		// 1.2 — Issue a stateless JWT instead of storing an ephemeral token.
+		// Survives container restarts — no server-side state required.
+		sessionToken, err := s.issueJWT(30 * 24 * time.Hour)
+		if err != nil {
+			slog.Error("failed to issue JWT", "error", err)
 			http.Error(w, "Internal error", http.StatusInternalServerError)
 			return
 		}
-		sessionToken := base64.RawURLEncoding.EncodeToString(tokenBytes)
-		expiry := time.Now().Add(30 * 24 * time.Hour)
 
-		s.sessionTokensMu.Lock()
-		s.sessionTokens[sessionToken] = expiry
-		s.sessionTokensMu.Unlock()
-
-		slog.Info("OAuth ephemeral token issued", "remote", r.RemoteAddr, "expires", expiry.Format(time.RFC3339))
+		slog.Info("OAuth JWT issued", "remote", r.RemoteAddr)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"access_token": sessionToken,
@@ -956,15 +998,6 @@ func (s *MCPServer) StartHub(ctx context.Context, port int, baseURL string) erro
 					}
 				}
 				pendingCodes.Unlock()
-
-				// Clean expired session tokens
-				s.sessionTokensMu.Lock()
-				for token, expiry := range s.sessionTokens {
-					if now.After(expiry) {
-						delete(s.sessionTokens, token)
-					}
-				}
-				s.sessionTokensMu.Unlock()
 			}
 		}
 	}()
