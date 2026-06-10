@@ -78,4 +78,4 @@ The Synthesizer generates macro-level context for shard clusters using LLM summa
 **Fault isolation:** Summarization runs in a detached goroutine with a separate 5-minute timeout. Gemini API failures are logged and skipped — the MCP server is never affected. Rate limiting (2s between calls) respects the Gemini free tier (15 RPM).
 
 ---
-*Status: PHASE 6.7 COMPLETE (Dynamic Summarizer Gate) | Transport: Streamable HTTP (MCP 2024-11-05) | Date: 2026-06-10*
+*Status: PHASE 6.8 COMPLETE (OAuth Confidential Client) | Transport: Streamable HTTP (MCP 2024-11-05) | Date: 2026-06-10*

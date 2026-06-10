@@ -21,6 +21,10 @@ Create a `.env` file in the project root (use `.env.example` as a template):
 # Authentication
 HUB_API_KEY=shl_live_your_secret_token
 
+# OAuth Client Credentials (required for Claude.ai connector)
+OAUTH_CLIENT_ID=claude-ai-connector
+OAUTH_CLIENT_SECRET=your_oauth_client_secret   # generate: openssl rand -base64 32
+
 # Gemini (Embedding + Summarization)
 GEMINI_API_KEY=your_gemini_key
 EMBEDDING_MODE=gemini
@@ -95,7 +99,7 @@ Shard-Link implements layered security without requiring sidecar proxies:
 1. **The Edge (Cloudflare):** Outbound-only tunnels protect the Hub from direct internet exposure.
 2. **The App (Token Middleware):** All MCP endpoints require authentication via `X-API-Key` or `Authorization: Bearer`.
 3. **The Transport (HTTPS):** Encryption-in-transit via Cloudflare Tunnel ensures tokens cannot be sniffed.
-4. **OAuth Hardening:** Redirect URI whitelist, mandatory S256 PKCE, ephemeral session tokens, per-IP rate limiting, and security headers on all OAuth responses.
+4. **OAuth Hardening:** Confidential client credentials (`client_id` + `client_secret`), redirect URI whitelist, mandatory S256 PKCE, stateless JWT tokens, per-IP rate limiting, and security headers on all OAuth responses.
 
 ### Authentication Methods
 
@@ -106,19 +110,21 @@ The Hub accepts two auth methods:
 | API Key | `X-API-Key: <key>` | Claude Code CLI, curl, direct clients |
 | Bearer Token | `Authorization: Bearer <token>` | Claude.ai (via OAuth), other OAuth clients |
 
-**Important:** OAuth clients receive **ephemeral session tokens** (24hr TTL), not the raw API key. If a token leaks, only that session is compromised.
+**Important:** OAuth clients receive **stateless JWTs** (30-day TTL, HS256-signed with `HUB_API_KEY`). JWTs survive container restarts — no server-side token state required. If a token leaks, only that session is compromised — the master key is never exposed.
 
 ### OAuth 2.0 Flow (Claude.ai)
 
-The OAuth implementation follows RFC 7636 (Authorization Code + PKCE):
+The OAuth implementation follows RFC 7636 (Authorization Code + PKCE) with confidential client authentication:
 
-1. Claude.ai redirects the browser to `/authorize` with a `code_challenge` (S256)
-2. The server validates the `redirect_uri` against a trusted host whitelist (`claude.ai`)
+1. Claude.ai redirects the browser to `/authorize` with `client_id` and `code_challenge` (S256)
+2. The server validates `client_id` against the registered client, then validates `redirect_uri` against a trusted host whitelist (`claude.ai`)
 3. A one-time authorization code is issued and redirected back
-4. Claude.ai exchanges the code + `code_verifier` at `/token`
-5. The server validates PKCE (constant-time comparison) and returns an ephemeral Bearer token
+4. Claude.ai exchanges the code + `code_verifier` + `client_id` + `client_secret` at `/token`
+5. The server validates client credentials (constant-time), then PKCE, and returns a stateless JWT
 
 **Protections:**
+- `client_id` must match the registered `OAUTH_CLIENT_ID` at both `/authorize` and `/token`
+- `client_secret` is validated at `/token` using `crypto/subtle.ConstantTimeCompare` (prevents timing attacks)
 - `redirect_uri` must be HTTPS and on a whitelisted host (prevents open redirect attacks)
 - `code_challenge_method` must be `S256` (plain method rejected)
 - `code_verifier` is mandatory at `/token` (PKCE cannot be bypassed)
@@ -172,9 +178,9 @@ Shard-Link connects as a custom MCP connector on Claude.ai (Pro/Max/Team/Enterpr
 1. Go to **Customize > Connectors > Add custom connector**
 2. URL: `https://your-hub.example.com/mcp`
 3. Advanced settings:
-   - **OAuth Client ID:** `shard-link`
-   - **OAuth Client Secret:** your `HUB_API_KEY` value
-4. Click **Connect** — the server auto-approves and issues an ephemeral Bearer token
+   - **OAuth Client ID:** your `OAUTH_CLIENT_ID` value (e.g. `claude-ai-connector`)
+   - **OAuth Client Secret:** your `OAUTH_CLIENT_SECRET` value
+4. Click **Connect** — the server validates credentials, auto-approves, and issues a stateless JWT
 
 Once connected, toggle Shard-Link per conversation via the **"+"** button at the bottom of the chat input.
 
@@ -218,7 +224,9 @@ After deployment, verify the security hardening:
 | Content limit | `save_memory` with 200KB content | Error — exceeds 100KB |
 | DB ports local-only | `curl http://<host-ip>:7474` from another machine | Connection refused |
 | Visual Ego local-only | `curl http://<host-ip>:8081` from another machine | Connection refused |
-| Claude.ai connector | Remove and re-add connector | OAuth flow completes, ephemeral token issued |
+| Client credentials | POST `/token` with wrong `client_secret` | 401 — `{"error": "invalid_client"}` |
+| Unknown client_id | GET `/authorize?client_id=unknown&...` | 401 — Invalid client_id |
+| Claude.ai connector | Remove and re-add connector with correct credentials | OAuth flow completes, JWT issued |
 | Claude Code CLI | `claude mcp get shard-link` | Tools listed, X-API-Key auth works |
 
 ---
