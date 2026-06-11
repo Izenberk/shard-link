@@ -14,16 +14,35 @@ Execute shard operation: **$ARGUMENTS**
 
 This is the Shard-Link project workspace. You have access to:
 - **Remote MCP Hub:** Via Cloudflare tunnel (see .env PUBLIC_URL)
-- **Local MCP endpoint:** `http://localhost:8080/sse` (direct Docker access)
+- **Local MCP endpoint:** `http://localhost:8080/mcp` (direct Docker access)
 - **Neo4j Browser:** `http://localhost:7474` (credentials in .env)
 - **Source code:** `internal/mcp/server.go`
 - **Infrastructure:** Docker Compose stack
 
 ## Available MCP Tools
 
-- `shard-link:search_all` → Search across all indexes
+### Search (content retrieval)
+- `shard-link:search_all` → Search across all indexes (vector, text, graph)
+- `shard-link:search_memory` → Vector search only
+- `shard-link:search_text` → Full-text index only
+- `shard-link:search_graph` → Neo4j Knowledge Mesh only
+
+### Read (exact lookup)
+- `shard-link:get_shard` → Fetch single shard by exact ID
+- `shard-link:get_core_shards` → Fetch all core identity shards
+- `shard-link:get_status` → Mesh stats and service health
+
+### Observation (metadata-only, no content, no touch)
+- `shard-link:get_recent_shards` → List by most recently updated
+- `shard-link:get_shards_by_category` → List all shards in a category
+- `shard-link:get_at_risk_shards` → Inspect low-survival eviction candidates
+
+### Write
 - `shard-link:save_memory` → Persist memories
-- `shard-link:get_activities` → View activity feed
+
+### CRUD
+- `shard-link:update_shard` → Update category/content (re-embeds if content changes)
+- `shard-link:delete_shard` → Permanently delete a shard and its relationships
 
 ## Development Commands
 

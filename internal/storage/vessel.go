@@ -398,7 +398,7 @@ func (v *Vessel) ArchiveShard(ctx context.Context, id string) error {
 		return err
 	}
 
-	return v.DeleteShard(id)
+	return v.DeleteShard(ctx, id)
 }
 
 func (v *Vessel) GetAllShards(ctx context.Context) ([]Shard, error) {
@@ -576,7 +576,7 @@ func isResonantToCore(vec []byte, coreVectors [][]byte, threshold float64) bool 
 	return false
 }
 
-func (v *Vessel) DeleteShard(id string) error {
+func (v *Vessel) DeleteShard(ctx context.Context, id string) error {
 	stmt, _, err := v.conn.Prepare("DELETE FROM shards WHERE id = ?")
 	if err != nil {
 		return err
@@ -782,6 +782,24 @@ func (v *Vessel) Optimize(ctx context.Context) error {
 		return fmt.Errorf("vacuum failed: %w", err)
 	}
 
+	return nil
+}
+
+// --- Observation & CRUD no-ops (Neo4j-only features) ---
+
+func (v *Vessel) GetRecentShards(ctx context.Context, limit int, category string) ([]ShardMetadata, error) {
+	return nil, nil
+}
+
+func (v *Vessel) GetShardsByCategory(ctx context.Context, category string, limit int) ([]ShardMetadata, error) {
+	return nil, nil
+}
+
+func (v *Vessel) GetAtRiskShards(ctx context.Context, limit int, threshold float64) ([]ShardMetadata, error) {
+	return nil, nil
+}
+
+func (v *Vessel) UpdateShard(ctx context.Context, id string, updates ShardUpdate) error {
 	return nil
 }
 

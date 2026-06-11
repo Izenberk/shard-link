@@ -76,6 +76,26 @@ type Shard struct {
 	RetrievalHistory []time.Time // Rolling window of last 20 retrieval timestamps
 }
 
+// ShardMetadata is the read-only shape returned by observation tools (get_recent_shards,
+// get_shards_by_category, get_at_risk_shards). Deliberately excludes Content and Vector
+// to prevent AI agents from bypassing search_all for content retrieval.
+type ShardMetadata struct {
+	ID            string    `json:"id"`
+	Category      string    `json:"category"`
+	SurvivalScore float64   `json:"survival_score"`
+	CreatedAt     time.Time `json:"created_at"`
+	LastUsed      time.Time `json:"last_used"`
+}
+
+// ShardUpdate holds optional fields for partial shard updates.
+// Zero-value (empty string / nil) fields are not applied.
+type ShardUpdate struct {
+	Content     string // empty = no change
+	Category    string // empty = no change
+	Vector      []byte // nil = no change (set by handler when content changes)
+	ConfirmCore bool   // must be true to mutate a shard whose current category is "core"
+}
+
 // ShardBond represents a semantic link between fragments.
 type ShardBond struct {
 	FromID string  `json:"from_id"`

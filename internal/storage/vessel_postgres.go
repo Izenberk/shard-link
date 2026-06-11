@@ -552,6 +552,28 @@ func (v *PostgresVessel) Optimize(ctx context.Context) error {
 	return nil
 }
 
+// --- Observation & CRUD no-ops (Neo4j-only features) ---
+
+func (v *PostgresVessel) GetRecentShards(ctx context.Context, limit int, category string) ([]ShardMetadata, error) {
+	return nil, nil
+}
+
+func (v *PostgresVessel) GetShardsByCategory(ctx context.Context, category string, limit int) ([]ShardMetadata, error) {
+	return nil, nil
+}
+
+func (v *PostgresVessel) GetAtRiskShards(ctx context.Context, limit int, threshold float64) ([]ShardMetadata, error) {
+	return nil, nil
+}
+
+func (v *PostgresVessel) UpdateShard(ctx context.Context, id string, updates ShardUpdate) error {
+	return nil
+}
+
+func (v *PostgresVessel) DeleteShard(ctx context.Context, id string) error {
+	return nil
+}
+
 // serializeRetrievalHistoryPG converts Go timestamps to a Postgres TEXT[] compatible format.
 func serializeRetrievalHistoryPG(history []time.Time) []string {
 	if len(history) == 0 {

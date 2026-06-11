@@ -32,6 +32,15 @@ type Repository interface {
 	SyncBonds(ctx context.Context, threshold float64) (int, error)
 	ReinforceShards(ctx context.Context, ids []string) error
 
+	// Observation (metadata-only, no touch)
+	GetRecentShards(ctx context.Context, limit int, category string) ([]ShardMetadata, error)
+	GetShardsByCategory(ctx context.Context, category string, limit int) ([]ShardMetadata, error)
+	GetAtRiskShards(ctx context.Context, limit int, threshold float64) ([]ShardMetadata, error)
+
+	// CRUD
+	UpdateShard(ctx context.Context, id string, updates ShardUpdate) error
+	DeleteShard(ctx context.Context, id string) error
+
 	// Analytics
 	GetSurvivalDistribution(ctx context.Context) (map[string]int, error)
 

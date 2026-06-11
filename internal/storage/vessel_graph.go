@@ -1078,3 +1078,221 @@ func deserializeRetrievalHistory(raw []any) []time.Time {
 	}
 	return out
 }
+
+// --- Observation Tools (metadata-only, no touch) ---
+
+// nodeToShardMetadata extracts metadata fields from a Neo4j record returned by
+// observation queries. These queries RETURN individual properties (not the full node)
+// to structurally enforce the metadata-only contract.
+func recordToShardMetadata(record *neo4j.Record) ShardMetadata {
+	id, _ := record.Get("id")
+	cat, _ := record.Get("category")
+	surv, _ := record.Get("survival")
+	ca, _ := record.Get("created_at")
+	lu, _ := record.Get("last_used")
+
+	sm := ShardMetadata{}
+	if s, ok := id.(string); ok {
+		sm.ID = s
+	}
+	if s, ok := cat.(string); ok {
+		sm.Category = s
+	}
+	if f, ok := surv.(float64); ok {
+		sm.SurvivalScore = f
+	}
+
+	// Timestamps: try string (RFC3339) first, then direct time.Time
+	if s, ok := ca.(string); ok {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			sm.CreatedAt = t
+		}
+	} else if t, ok := ca.(time.Time); ok {
+		sm.CreatedAt = t
+	}
+	if s, ok := lu.(string); ok {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			sm.LastUsed = t
+		}
+	} else if t, ok := lu.(time.Time); ok {
+		sm.LastUsed = t
+	}
+
+	return sm
+}
+
+func (v *VesselGraph) GetRecentShards(ctx context.Context, limit int, category string) ([]ShardMetadata, error) {
+	query := `
+	MATCH (s:Shard)
+	WHERE s.category <> 'archived'
+	  AND ($category = '' OR s.category = $category)
+	RETURN s.id AS id, s.category AS category, 0.0 AS survival,
+	       s.created_at AS created_at, s.last_used AS last_used
+	ORDER BY s.last_used DESC
+	LIMIT $limit
+	`
+	// Survival is returned as 0.0 placeholder — we compute it in Go below.
+	params := map[string]any{"category": category, "limit": int64(limit)}
+
+	result, err := neo4j.ExecuteQuery(ctx, v.driver, query, params, neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithDatabase(v.dbName))
+	if err != nil {
+		return nil, err
+	}
+
+	shards := make([]ShardMetadata, 0, len(result.Records))
+	for _, record := range result.Records {
+		sm := recordToShardMetadata(record)
+		shards = append(shards, sm)
+	}
+	return shards, nil
+}
+
+func (v *VesselGraph) GetShardsByCategory(ctx context.Context, category string, limit int) ([]ShardMetadata, error) {
+	query := `
+	MATCH (s:Shard {category: $category})
+	WHERE s.category <> 'archived'
+	RETURN s.id AS id, s.category AS category, 0.0 AS survival,
+	       s.created_at AS created_at, s.last_used AS last_used
+	ORDER BY s.last_used DESC
+	LIMIT $limit
+	`
+	params := map[string]any{"category": category, "limit": int64(limit)}
+
+	result, err := neo4j.ExecuteQuery(ctx, v.driver, query, params, neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithDatabase(v.dbName))
+	if err != nil {
+		return nil, err
+	}
+
+	shards := make([]ShardMetadata, 0, len(result.Records))
+	for _, record := range result.Records {
+		sm := recordToShardMetadata(record)
+		shards = append(shards, sm)
+	}
+	return shards, nil
+}
+
+// GetAtRiskShards fetches non-core shards and filters to those with survival below threshold.
+// Survival is computed in Go via SurvivalScoreV4 (same as GetEvictionCandidates).
+// CRITICAL: Pure read — no ReinforceShards, no last_used update, no RetrievalHistory append.
+func (v *VesselGraph) GetAtRiskShards(ctx context.Context, limit int, threshold float64) ([]ShardMetadata, error) {
+	// Fetch all non-core shards with their bond degree for SurvivalScoreV4 input.
+	// No Cypher-side filtering on survival — it's computed in Go.
+	query := `
+	MATCH (s:Shard)
+	WHERE s.category <> 'core' AND s.category <> 'archived'
+	OPTIONAL MATCH (s)-[r:CONNECTED_TO]-()
+	RETURN s, count(r) AS degree
+	`
+	result, err := neo4j.ExecuteQuery(ctx, v.driver, query, nil, neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithDatabase(v.dbName))
+	if err != nil {
+		return nil, err
+	}
+
+	type scored struct {
+		meta  ShardMetadata
+		score float64
+	}
+	var candidates []scored
+
+	for _, record := range result.Records {
+		node, _ := record.Get("s")
+		degree, _ := record.Get("degree")
+
+		shard := nodeToShard(node.(neo4j.Node))
+		bondCount := int(degree.(int64))
+
+		score := SurvivalScoreV4(bondCount, shard.PageRank, shard.Salience, shard.RetrievalHistory, shard.LastUsed)
+		if score >= threshold {
+			continue
+		}
+
+		candidates = append(candidates, scored{
+			meta: ShardMetadata{
+				ID:            shard.ID,
+				Category:      shard.Category,
+				SurvivalScore: score,
+				CreatedAt:     shard.CreatedAt,
+				LastUsed:      shard.LastUsed,
+			},
+			score: score,
+		})
+	}
+
+	// Sort ascending — lowest survival first
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].score < candidates[j].score
+	})
+
+	if limit > len(candidates) {
+		limit = len(candidates)
+	}
+	result_meta := make([]ShardMetadata, limit)
+	for i := 0; i < limit; i++ {
+		result_meta[i] = candidates[i].meta
+	}
+	return result_meta, nil
+}
+
+// --- CRUD ---
+
+func (v *VesselGraph) UpdateShard(ctx context.Context, id string, updates ShardUpdate) error {
+	query := `
+	MATCH (s:Shard {id: $id})
+	SET s.content = CASE WHEN $content <> '' THEN $content ELSE s.content END,
+	    s.category = CASE WHEN $category <> '' THEN $category ELSE s.category END,
+	    s.embedding = CASE WHEN $hasVector THEN $vector ELSE s.embedding END,
+	    s.last_used = datetime()
+	RETURN s.id AS id
+	`
+	// Neo4j stores the vector as the "embedding" property ([]float64 list).
+	// Convert []byte → []float64 for Neo4j compatibility.
+	var neoVec any
+	hasVector := len(updates.Vector) > 0
+	if hasVector {
+		floats := DecodeVector(updates.Vector)
+		f64 := make([]float64, len(floats))
+		for i, f := range floats {
+			f64[i] = float64(f)
+		}
+		neoVec = f64
+	}
+
+	params := map[string]any{
+		"id":        id,
+		"content":   updates.Content,
+		"category":  updates.Category,
+		"hasVector": hasVector,
+		"vector":    neoVec,
+	}
+
+	result, err := neo4j.ExecuteQuery(ctx, v.driver, query, params, neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithDatabase(v.dbName))
+	if err != nil {
+		return err
+	}
+	if len(result.Records) == 0 {
+		return fmt.Errorf("shard %s not found in mesh", id)
+	}
+	return nil
+}
+
+func (v *VesselGraph) DeleteShard(ctx context.Context, id string) error {
+	// Two-step: verify existence, then delete. DETACH DELETE on a non-existent
+	// node silently succeeds, so we check counters to report "not found".
+	query := `
+	MATCH (s:Shard {id: $id})
+	DETACH DELETE s
+	`
+	result, err := neo4j.ExecuteQuery(ctx, v.driver, query, map[string]any{"id": id}, neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithDatabase(v.dbName))
+	if err != nil {
+		return err
+	}
+	if result.Summary.Counters().NodesDeleted() == 0 {
+		return fmt.Errorf("shard %s not found in mesh", id)
+	}
+	return nil
+}

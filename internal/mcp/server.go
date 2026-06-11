@@ -251,6 +251,52 @@ func (s *MCPServer) RegisterTools() {
 		mcp.WithDescription("Fetch all core identity shards"),
 	)
 	s.mcp.AddTool(getCoreShardsTool, s.handleGetCoreShards)
+
+	// --- Observation tools (metadata-only, no touch) ---
+
+	slog.Debug("registering tool", "name", "get_recent_shards")
+	recentTool := mcp.NewTool("get_recent_shards",
+		mcp.WithDescription("List shards by most recently updated. Returns metadata only (id, category, survival_score, timestamps) — use get_shard(id) for full content. Does NOT count as retrieval (no survival score impact)."),
+		mcp.WithNumber("limit", mcp.Description("Max shards to return (default 10, max 100)")),
+		mcp.WithString("category", mcp.Description("Optional category filter")),
+	)
+	s.mcp.AddTool(recentTool, s.handleGetRecentShards)
+
+	slog.Debug("registering tool", "name", "get_shards_by_category")
+	byCategoryTool := mcp.NewTool("get_shards_by_category",
+		mcp.WithDescription("List all shards in a specific category. Returns metadata only (id, category, survival_score, timestamps) — use get_shard(id) for full content. Does NOT count as retrieval (no survival score impact)."),
+		mcp.WithString("category", mcp.Description("Category to filter (e.g. core, memory, session, contract)"), mcp.Required()),
+		mcp.WithNumber("limit", mcp.Description("Max shards to return (default 50, max 100)")),
+	)
+	s.mcp.AddTool(byCategoryTool, s.handleGetShardsByCategory)
+
+	slog.Debug("registering tool", "name", "get_at_risk_shards")
+	atRiskTool := mcp.NewTool("get_at_risk_shards",
+		mcp.WithDescription("Inspect shards with lowest survival scores (eviction candidates). Returns metadata only (id, category, survival_score, last_used) — use get_shard(id) for full content. Does NOT count as retrieval (no survival score impact). Core shards excluded."),
+		mcp.WithNumber("limit", mcp.Description("Max shards to return (default 10, max 100)")),
+		mcp.WithNumber("threshold", mcp.Description("Only shards with survival below this value (default 30, range 0-100)")),
+	)
+	s.mcp.AddTool(atRiskTool, s.handleGetAtRiskShards)
+
+	// --- CRUD tools ---
+
+	slog.Debug("registering tool", "name", "update_shard")
+	updateTool := mcp.NewTool("update_shard",
+		mcp.WithDescription("Update a shard's category and/or content. If content changes, the vector is re-embedded automatically. Blocked for comm-summary-* shards. Core shards require confirm_core=true."),
+		mcp.WithString("id", mcp.Description("Exact shard ID to update"), mcp.Required()),
+		mcp.WithString("content", mcp.Description("New content (triggers re-embedding if changed)")),
+		mcp.WithString("category", mcp.Description("New category (must be in allowlist)")),
+		mcp.WithBoolean("confirm_core", mcp.Description("Must be true to mutate a core-category shard")),
+	)
+	s.mcp.AddTool(updateTool, s.handleUpdateShard)
+
+	slog.Debug("registering tool", "name", "delete_shard")
+	deleteTool := mcp.NewTool("delete_shard",
+		mcp.WithDescription("Permanently delete a shard and all its relationships. Blocked for comm-summary-* shards. Core shards require confirm_core=true."),
+		mcp.WithString("id", mcp.Description("Exact shard ID to delete"), mcp.Required()),
+		mcp.WithBoolean("confirm_core", mcp.Description("Must be true to delete a core-category shard")),
+	)
+	s.mcp.AddTool(deleteTool, s.handleDeleteShard)
 }
 
 func (s *MCPServer) handleSearchAll(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -492,6 +538,259 @@ func (s *MCPServer) handleGetCoreShards(ctx context.Context, request mcp.CallToo
 	}
 
 	return mcp.NewToolResultText(string(payload)), nil
+}
+
+// --- Observation Handlers (metadata-only, no touch) ---
+
+// metadataResponse is the JSON shape for observation tools.
+// Deliberately excludes Content and Vector to prevent search bypass.
+type metadataResponse struct {
+	ID            string  `json:"id"`
+	Category      string  `json:"category"`
+	SurvivalScore float64 `json:"survival_score"`
+	CreatedAt     string  `json:"created_at"`
+	LastUsed      string  `json:"last_used"`
+}
+
+func toMetadataResponse(sm storage.ShardMetadata) metadataResponse {
+	return metadataResponse{
+		ID:            sm.ID,
+		Category:      sm.Category,
+		SurvivalScore: sm.SurvivalScore,
+		CreatedAt:     sm.CreatedAt.Format(time.RFC3339),
+		LastUsed:      sm.LastUsed.Format(time.RFC3339),
+	}
+}
+
+func (s *MCPServer) handleGetRecentShards(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	limit := int(request.GetFloat("limit", 10))
+	category := request.GetString("category", "")
+
+	slog.Info("get_recent_shards called", "limit", limit, "category", category)
+
+	if limit > maxResultLimit {
+		limit = maxResultLimit
+	}
+
+	shards, err := s.vessel.GetRecentShards(ctx, limit, category)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to fetch recent shards: %v", err)), nil
+	}
+
+	if len(shards) == 0 {
+		return mcp.NewToolResultText("No shards found."), nil
+	}
+
+	responses := make([]metadataResponse, len(shards))
+	for i, sm := range shards {
+		responses[i] = toMetadataResponse(sm)
+	}
+
+	payload, err := json.Marshal(responses)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal response: %v", err)), nil
+	}
+	return mcp.NewToolResultText(string(payload)), nil
+}
+
+func (s *MCPServer) handleGetShardsByCategory(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	category := request.GetString("category", "")
+	limit := int(request.GetFloat("limit", 50))
+
+	slog.Info("get_shards_by_category called", "category", category, "limit", limit)
+
+	if category == "" {
+		return mcp.NewToolResultError("category is required"), nil
+	}
+	if limit > maxResultLimit {
+		limit = maxResultLimit
+	}
+
+	shards, err := s.vessel.GetShardsByCategory(ctx, category, limit)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to fetch shards by category: %v", err)), nil
+	}
+
+	if len(shards) == 0 {
+		return mcp.NewToolResultText(fmt.Sprintf("No shards found in category %q.", category)), nil
+	}
+
+	responses := make([]metadataResponse, len(shards))
+	for i, sm := range shards {
+		responses[i] = toMetadataResponse(sm)
+	}
+
+	payload, err := json.Marshal(responses)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal response: %v", err)), nil
+	}
+	return mcp.NewToolResultText(string(payload)), nil
+}
+
+func (s *MCPServer) handleGetAtRiskShards(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	limit := int(request.GetFloat("limit", 10))
+	threshold := request.GetFloat("threshold", 30)
+
+	slog.Info("get_at_risk_shards called", "limit", limit, "threshold", threshold)
+
+	if limit > maxResultLimit {
+		limit = maxResultLimit
+	}
+
+	shards, err := s.vessel.GetAtRiskShards(ctx, limit, threshold)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to fetch at-risk shards: %v", err)), nil
+	}
+
+	if len(shards) == 0 {
+		return mcp.NewToolResultText("No at-risk shards found below the threshold."), nil
+	}
+
+	responses := make([]metadataResponse, len(shards))
+	for i, sm := range shards {
+		responses[i] = toMetadataResponse(sm)
+	}
+
+	payload, err := json.Marshal(responses)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal response: %v", err)), nil
+	}
+	return mcp.NewToolResultText(string(payload)), nil
+}
+
+// --- CRUD Handlers ---
+
+func (s *MCPServer) handleUpdateShard(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	id := request.GetString("id", "")
+	content := request.GetString("content", "")
+	category := request.GetString("category", "")
+	confirmCore := request.GetBool("confirm_core", false)
+
+	slog.Info("update_shard called", "id", id, "has_content", content != "", "category", category, "confirm_core", confirmCore)
+
+	if id == "" {
+		return mcp.NewToolResultError("id is required"), nil
+	}
+	if content == "" && category == "" {
+		return mcp.NewToolResultError("at least one of content or category must be provided"), nil
+	}
+
+	// Block comm-summary-* shards (system-managed by Synthesizer)
+	if strings.HasPrefix(id, "comm-summary-") {
+		return mcp.NewToolResultError("comm-summary-* shards are system-managed and cannot be updated via MCP"), nil
+	}
+
+	// Category allowlist check
+	if category != "" && !allowedCategories[category] {
+		return mcp.NewToolResultError(fmt.Sprintf("category %q is not allowed. Allowed: core, memory, session, tech, arch, contract", category)), nil
+	}
+
+	// Core-category guard: fetch current shard to check its category
+	existing, err := s.vessel.GetShardByID(ctx, id)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("shard not found: %s", id)), nil
+	}
+	if existing.Category == "core" && !confirmCore {
+		payload, _ := json.Marshal(map[string]string{
+			"status":           "confirm_required",
+			"id":               id,
+			"current_category": "core",
+			"message":          "This is a core identity shard. Re-issue with confirm_core=true to proceed.",
+		})
+		return mcp.NewToolResultText(string(payload)), nil
+	}
+
+	// Build update struct
+	update := storage.ShardUpdate{
+		Content:     content,
+		Category:    category,
+		ConfirmCore: confirmCore,
+	}
+
+	// Re-embed if content changed
+	if content != "" && s.embedder != nil {
+		floats, err := s.embedder.Embed(ctx, content)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("re-embedding failed: %v", err)), nil
+		}
+		update.Vector = storage.EncodeVector(floats)
+	}
+
+	if err := s.vessel.UpdateShard(ctx, id, update); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("update failed: %v", err)), nil
+	}
+
+	// Activity Ledger
+	if s.ledger != nil {
+		msg := fmt.Sprintf("Updated shard [%s]", id)
+		if content != "" {
+			msg += " (content re-embedded)"
+		}
+		if category != "" {
+			msg += fmt.Sprintf(" (category: %s → %s)", existing.Category, category)
+		}
+		logType := "update"
+		if existing.Category == "core" && confirmCore {
+			logType = "update_core_override"
+		}
+		_ = s.ledger.SaveActivity(ctx, storage.ShardActivity{
+			Type:    logType,
+			Message: msg,
+			ShardID: id,
+		})
+	}
+
+	return mcp.NewToolResultText(fmt.Sprintf("Shard updated: %s", id)), nil
+}
+
+func (s *MCPServer) handleDeleteShard(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	id := request.GetString("id", "")
+	confirmCore := request.GetBool("confirm_core", false)
+
+	slog.Info("delete_shard called", "id", id, "confirm_core", confirmCore)
+
+	if id == "" {
+		return mcp.NewToolResultError("id is required"), nil
+	}
+
+	// Block comm-summary-* shards (system-managed, no override)
+	if strings.HasPrefix(id, "comm-summary-") {
+		return mcp.NewToolResultError("comm-summary-* shards are system-managed and cannot be deleted via MCP"), nil
+	}
+
+	// Core-category guard
+	existing, err := s.vessel.GetShardByID(ctx, id)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("shard not found: %s", id)), nil
+	}
+	if existing.Category == "core" && !confirmCore {
+		payload, _ := json.Marshal(map[string]string{
+			"status":           "confirm_required",
+			"id":               id,
+			"current_category": "core",
+			"message":          "This is a core identity shard. Re-issue with confirm_core=true to proceed.",
+		})
+		return mcp.NewToolResultText(string(payload)), nil
+	}
+
+	if err := s.vessel.DeleteShard(ctx, id); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("delete failed: %v", err)), nil
+	}
+
+	// Activity Ledger
+	if s.ledger != nil {
+		logType := "delete"
+		if existing.Category == "core" && confirmCore {
+			logType = "delete_core_override"
+		}
+		_ = s.ledger.SaveActivity(ctx, storage.ShardActivity{
+			Type:    logType,
+			Message: fmt.Sprintf("Deleted shard [%s] (category=%s)", id, existing.Category),
+			ShardID: id,
+		})
+	}
+
+	return mcp.NewToolResultText(fmt.Sprintf("Shard deleted: %s", id)), nil
 }
 
 func (s *MCPServer) handleSearchGraph(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
