@@ -167,6 +167,8 @@ func (s *Synthesizer) summarizeCommunities(parentCtx context.Context, communityI
 			continue
 		}
 
+		members = filterSummarizable(members)
+
 		if len(members) < 3 {
 			slog.Debug("synthesizer skipping small community",
 				"community_id", cid, "members", len(members))
@@ -217,6 +219,20 @@ func (s *Synthesizer) summarizeCommunities(parentCtx context.Context, communityI
 			time.Sleep(2 * time.Second)
 		}
 	}
+}
+
+// filterSummarizable removes shards that should not participate in
+// community summarization. Contract shards are agent-to-agent
+// communication — they bond normally but their content should not
+// appear in comm-summary-* knowledge digests.
+func filterSummarizable(shards []storage.Shard) []storage.Shard {
+	out := shards[:0]
+	for _, s := range shards {
+		if s.Category != "contract" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func buildSummaryPrompt(communityID int64, members []storage.Shard) string {
