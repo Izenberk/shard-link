@@ -1081,57 +1081,19 @@ func deserializeRetrievalHistory(raw []any) []time.Time {
 
 // --- Observation Tools (metadata-only, no touch) ---
 
-// nodeToShardMetadata extracts metadata fields from a Neo4j record returned by
-// observation queries. These queries RETURN individual properties (not the full node)
-// to structurally enforce the metadata-only contract.
-func recordToShardMetadata(record *neo4j.Record) ShardMetadata {
-	id, _ := record.Get("id")
-	cat, _ := record.Get("category")
-	surv, _ := record.Get("survival")
-	ca, _ := record.Get("created_at")
-	lu, _ := record.Get("last_used")
-
-	sm := ShardMetadata{}
-	if s, ok := id.(string); ok {
-		sm.ID = s
-	}
-	if s, ok := cat.(string); ok {
-		sm.Category = s
-	}
-	if f, ok := surv.(float64); ok {
-		sm.SurvivalScore = f
-	}
-
-	// Timestamps: try string (RFC3339) first, then direct time.Time
-	if s, ok := ca.(string); ok {
-		if t, err := time.Parse(time.RFC3339, s); err == nil {
-			sm.CreatedAt = t
-		}
-	} else if t, ok := ca.(time.Time); ok {
-		sm.CreatedAt = t
-	}
-	if s, ok := lu.(string); ok {
-		if t, err := time.Parse(time.RFC3339, s); err == nil {
-			sm.LastUsed = t
-		}
-	} else if t, ok := lu.(time.Time); ok {
-		sm.LastUsed = t
-	}
-
-	return sm
-}
-
 func (v *VesselGraph) GetRecentShards(ctx context.Context, limit int, category string) ([]ShardMetadata, error) {
+	// Fetch full nodes + bond degree so we can compute SurvivalScoreV4 in Go.
+	// Cypher handles ordering and limiting — Go only computes survival for the small result set.
 	query := `
 	MATCH (s:Shard)
 	WHERE s.category <> 'archived'
 	  AND ($category = '' OR s.category = $category)
-	RETURN s.id AS id, s.category AS category, 0.0 AS survival,
-	       s.created_at AS created_at, s.last_used AS last_used
+	OPTIONAL MATCH (s)-[r:CONNECTED_TO]-()
+	WITH s, count(r) AS degree
+	RETURN s, degree
 	ORDER BY s.last_used DESC
 	LIMIT $limit
 	`
-	// Survival is returned as 0.0 placeholder — we compute it in Go below.
 	params := map[string]any{"category": category, "limit": int64(limit)}
 
 	result, err := neo4j.ExecuteQuery(ctx, v.driver, query, params, neo4j.EagerResultTransformer,
@@ -1142,8 +1104,19 @@ func (v *VesselGraph) GetRecentShards(ctx context.Context, limit int, category s
 
 	shards := make([]ShardMetadata, 0, len(result.Records))
 	for _, record := range result.Records {
-		sm := recordToShardMetadata(record)
-		shards = append(shards, sm)
+		node, _ := record.Get("s")
+		degree, _ := record.Get("degree")
+		shard := nodeToShard(node.(neo4j.Node))
+		bondCount := int(degree.(int64))
+		score := SurvivalScoreV4(bondCount, shard.PageRank, shard.Salience, shard.RetrievalHistory, shard.LastUsed)
+
+		shards = append(shards, ShardMetadata{
+			ID:            shard.ID,
+			Category:      shard.Category,
+			SurvivalScore: score,
+			CreatedAt:     shard.CreatedAt,
+			LastUsed:      shard.LastUsed,
+		})
 	}
 	return shards, nil
 }
@@ -1152,8 +1125,9 @@ func (v *VesselGraph) GetShardsByCategory(ctx context.Context, category string, 
 	query := `
 	MATCH (s:Shard {category: $category})
 	WHERE s.category <> 'archived'
-	RETURN s.id AS id, s.category AS category, 0.0 AS survival,
-	       s.created_at AS created_at, s.last_used AS last_used
+	OPTIONAL MATCH (s)-[r:CONNECTED_TO]-()
+	WITH s, count(r) AS degree
+	RETURN s, degree
 	ORDER BY s.last_used DESC
 	LIMIT $limit
 	`
@@ -1167,8 +1141,19 @@ func (v *VesselGraph) GetShardsByCategory(ctx context.Context, category string, 
 
 	shards := make([]ShardMetadata, 0, len(result.Records))
 	for _, record := range result.Records {
-		sm := recordToShardMetadata(record)
-		shards = append(shards, sm)
+		node, _ := record.Get("s")
+		degree, _ := record.Get("degree")
+		shard := nodeToShard(node.(neo4j.Node))
+		bondCount := int(degree.(int64))
+		score := SurvivalScoreV4(bondCount, shard.PageRank, shard.Salience, shard.RetrievalHistory, shard.LastUsed)
+
+		shards = append(shards, ShardMetadata{
+			ID:            shard.ID,
+			Category:      shard.Category,
+			SurvivalScore: score,
+			CreatedAt:     shard.CreatedAt,
+			LastUsed:      shard.LastUsed,
+		})
 	}
 	return shards, nil
 }
