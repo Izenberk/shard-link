@@ -1042,7 +1042,11 @@ func (s *MCPServer) validateJWT(tokenString string) bool {
 		}
 		return []byte(s.apiKey), nil
 	}, jwt.WithIssuer("shard-link"), jwt.WithExpirationRequired())
-	return err == nil && token.Valid
+	if err != nil {
+		slog.Warn("JWT validation failed", "error", err)
+		return false
+	}
+	return token.Valid
 }
 
 // authCode holds a pending authorization code with its PKCE challenge.

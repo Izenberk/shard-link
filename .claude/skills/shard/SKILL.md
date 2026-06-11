@@ -44,6 +44,10 @@ This is the Shard-Link project workspace. You have access to:
 - `shard-link:update_shard` → Update category/content (re-embeds if content changes)
 - `shard-link:delete_shard` → Permanently delete a shard and its relationships
 
+**Rules:**
+- `save_memory` needs no confirmation — execute directly.
+- **ALWAYS confirm before `update_shard` or `delete_shard`.** Show shard ID and proposed change, wait for approval. For agent-composed content changes, draft the content and show it first. Category-only updates still require shard ID confirmation but no content draft.
+
 ## Development Commands
 
 For development tasks, you can use:
