@@ -6,7 +6,7 @@ import CommandBar from './components/CommandBar'
 import ActivityFeed from './components/ActivityFeed'
 import useGraphData from './hooks/useGraphData'
 import useActivityStream from './hooks/useActivityStream'
-import { searchGraph, evictShard, createBond, fetchCommunity, fetchGraph } from './lib/api'
+import { searchGraph, evictShard, createBond, deleteBond, fetchCommunity, fetchGraph } from './lib/api'
 
 export default function App() {
   const [selectedNode, setSelectedNode] = useState(null)
@@ -116,6 +116,16 @@ export default function App() {
     }
   }, [data, refetch])
 
+  const handleBondDeleted = useCallback(async (fromId, toId) => {
+    if (!confirm('Break bond?')) return
+    try {
+      await deleteBond(fromId, toId)
+      setTimeout(refetch, 500)
+    } catch (err) {
+      console.error(err)
+    }
+  }, [refetch])
+
   // 3-state community toggle: highlight -> isolate -> reset
   const handleCommunityClick = useCallback(async (communityId) => {
     if (!communityFilter || communityFilter.id !== communityId) {
@@ -184,6 +194,7 @@ export default function App() {
         changeType={changeType}
         onSelectNode={handleSelectNode}
         onBondCreated={handleBondCreated}
+        onBondDeleted={handleBondDeleted}
         bondMode={bondMode}
         focusedNodeId={selectedNode?.id || null}
         onZoomReady={handleZoomReady}
@@ -222,7 +233,7 @@ export default function App() {
       {/* Bottom Toolbar */}
       <CommandBar
         bondMode={bondMode}
-        onToggleBondMode={() => setBondMode(prev => !prev)}
+        onToggleBondMode={() => { setBondMode(prev => !prev); setSelectedNode(null); }}
         zoomControls={zoomControls}
       />
 

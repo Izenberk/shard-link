@@ -47,6 +47,7 @@ export default function MeshGraph({
   changeType,
   onSelectNode,
   onBondCreated,
+  onBondDeleted,
   bondMode,
   focusedNodeId,
   onZoomReady,
@@ -247,6 +248,13 @@ export default function MeshGraph({
       if (!tooltipEl) return
       tooltipEl.style.left = (event.clientX + 14) + 'px'
       tooltipEl.style.top = (event.clientY - 10) + 'px'
+    })
+    .on('click', (event, d) => {
+      if (!bondMode) return
+      event.stopPropagation()
+      const sID = d.source.id || d.source
+      const tID = d.target.id || d.target
+      onBondDeleted(sID, tID)
     })
 
     linkRef.current = link
