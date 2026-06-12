@@ -1,0 +1,14 @@
+/* Shard-Link Effect Tokens */
+:root {
+  --blur-panel: blur(10px);
+  --blur-heavy: blur(20px);
+  --blur-max: blur(30px);
+
+  --shadow-accent: 0 0 10px rgba(94, 243, 255, 0.3);
+  --shadow-glow: 0 0 30px rgba(94, 243, 255, 0.2);
+  --shadow-toolbar: 0 5px 25px rgba(0, 0, 0, 0.5);
+
+  --transition-default: all 0.2s;
+  --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slide: transform 0.3s ease;
+}

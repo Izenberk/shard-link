@@ -1,0 +1,13 @@
+/* Shard-Link Spacing Tokens */
+:root {
+  --space-xs: 4px;
+  --space-sm: 6px;
+  --space-md: 10px;
+  --space-lg: 15px;
+  --space-xl: 20px;
+  --space-2xl: 30px;
+
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-pill: 50px;
+}

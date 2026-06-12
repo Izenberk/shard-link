@@ -41,7 +41,12 @@ neo4j_logs/
 neo4j_plugins/
 *.txt
 *.html
+!web/dashboard/index.html
 *.sh
+
+# Vite / Node
+web/dashboard/node_modules/
+web/dashboard/dist/
 *.py
 neo4j_records.json
 

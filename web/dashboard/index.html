@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shard-Link: Visual Ego</title>
+  <link rel="icon" href="data:," />
+  <!-- Preload fonts so LCP text renders with correct typeface -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <!-- Inline critical CSS — paints before any JS loads -->
+  <style>
+    body {
+      margin: 0;
+      background: #06090f;
+      font-family: 'JetBrains Mono', monospace;
+      overflow: hidden;
+    }
+    #splash {
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #5ef3ff;
+      font-size: 14px;
+      letter-spacing: 2px;
+    }
+    #splash .blink {
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 0.4; }
+      50% { opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <!-- Splash: painted immediately by the browser, replaced when React mounts -->
+    <div id="splash">
+      <span class="blink">INITIALIZING_MESH...</span>
+    </div>
+  </div>
+  <script type="module" src="/src/main.jsx"></script>
+</body>
+</html>

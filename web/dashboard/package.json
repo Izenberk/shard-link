@@ -1,0 +1,25 @@
+{
+  "name": "shard-link-dashboard",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "d3-selection": "^3.0.0",
+    "d3-scale": "^4.0.0",
+    "d3-zoom": "^3.0.0",
+    "d3-force": "^3.0.0",
+    "d3-drag": "^3.0.0",
+    "d3-transition": "^3.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.4.1",
+    "vite": "^6.3.5"
+  }
+}

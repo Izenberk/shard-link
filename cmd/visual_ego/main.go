@@ -174,7 +174,7 @@ func main() {
 		log.Println("[Background] Mesh analysis complete.")
 	}()
 
-	http.Handle("/", http.FileServer(http.Dir("web/static")))
+	http.Handle("/", http.FileServer(http.Dir("web/dashboard/dist")))
 	// 2. API Endpoints
 	http.HandleFunc("/api/graph", srv.handleGetGraph)
 	http.HandleFunc("/api/search", srv.handleSearch)

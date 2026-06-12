@@ -1,0 +1,29 @@
+/* Shard-Link Color Tokens */
+:root {
+  --bg-color: #06090f;
+  --panel-bg: rgba(6, 9, 15, 0.9);
+  --panel-border: rgba(88, 166, 255, 0.3);
+  --text-main: #c9d1d9;
+  --text-muted: #8b949e;
+  --accent: #5ef3ff;
+  --shard-glow: #00d4ff;
+  --doc-glow: #ff7b3a;
+  --core-color: #ff9b3a;
+
+  /* Log type colors */
+  --log-success: #00ff88;
+  --log-bond: #5ef3ff;
+  --log-evict: #ff4444;
+  --log-info: #bbbbbb;
+  --log-warn: #ffaa00;
+  --log-system: #555e6b;
+  --log-search: #a371f7;
+  --log-error: #ff2d2d;
+
+  /* Health distribution */
+  --health-critical: #ff5252;
+  --health-low: #ff9800;
+  --health-mid: #ffd740;
+  --health-good: #69f0ae;
+  --health-excellent: #5ef3ff;
+}
