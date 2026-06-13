@@ -87,6 +87,7 @@ services:
       - ./neo4j_data:/data
       - ./neo4j_logs:/logs
       - ./neo4j_plugins:/plugins
+    restart: unless-stopped
     networks:
       - shard-link-net
     healthcheck:
