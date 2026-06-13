@@ -5,7 +5,7 @@
 >
 > Think of this as a P&ID diagram — every component is a node, every data flow is a pipe.
 >
-> **Last Updated:** 2026-05-31
+> **Last Updated:** 2026-06-13
 
 ---
 
@@ -99,8 +99,8 @@ Each card lists: what the component does, what feeds into it (upstream), what it
 |---|---|
 | **Upstream** | External clients via Cloudflare Tunnel (HTTPS) |
 | **Downstream** | Repository (all 3 backends), Embedder, Summarizer, WorkingMemory, GlobalLogger, Metrics (counters + latency) |
-| **Shared State** | `dirtyShardCount` (write via SaveShard → MarkShardDirty), `sessionTokens` + `pendingCodes` (OAuth), `GlobalLogger`, `metrics.*Total` counters, `metrics.*Latency` trackers |
-| **Config** | `HUB_API_KEY`, `PUBLIC_URL` |
+| **Shared State** | `dirtyShardCount` (write via SaveShard → MarkShardDirty), `pendingCodes` (OAuth), `GlobalLogger`, `metrics.*Total` counters, `metrics.*Latency` trackers |
+| **Config** | `HUB_API_KEY`, `PUBLIC_URL`, `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET` |
 
 **Tool Handlers:**
 
@@ -111,6 +111,14 @@ Each card lists: what the component does, what feeds into it (upstream), what it
 | `search_graph` | Embedder.Embed → WorkingMemory.Bias → SearchGraph → WorkingMemory.Update | Yes | Multi-hop traversal, touches center + neighbors |
 | `search_all` | FindText(false) + FindResonant(false) + SearchGraph(false) → deduplicate → ReinforceShards | Yes (unified) | Avoids double-touch via dedup + single ReinforceShards call |
 | `save_memory` | Embedder.Embed → Summarizer.Summarize (salience) → SaveShard → Episode linking | N/A | Sets salience, increments dirtyShardCount, creates Episode node (Neo4j) |
+| `get_status` | GetCount, GetBondCount, GetCommunityCount, Ping (all backends) | No | Returns mesh stats + service health as JSON |
+| `get_shard` | GetShard(id) → compute SurvivalScoreV4 | No | Single shard metadata lookup — no touch |
+| `get_core_shards` | GetCoreShards() | No | Lists all identity anchors |
+| `get_recent_shards` | GetRecentShards(limit) → compute SurvivalScoreV4 | No | Optional category filter |
+| `get_shards_by_category` | GetShardsByCategory(category, limit) → compute SurvivalScoreV4 | No | Filtered observation |
+| `get_at_risk_shards` | GetRecentShards → filter by SurvivalScoreV4 < threshold | No | Surfaces eviction candidates |
+| `update_shard` | GetShard → SaveShard (upsert) | N/A | Updates content/category/metadata, re-embeds if content changed |
+| `delete_shard` | DeleteShard(id) from all backends | N/A | Permanent removal — cannot delete core shards |
 
 **Resource/Prompt Handlers:**
 
@@ -272,6 +280,7 @@ Timer tick (30 min)
 ### Visual Ego
 
 > `cmd/visual_ego/main.go` — Real-time graph visualization dashboard
+> `web/dashboard/` — React 19 + Vite 6 frontend (Neural Observatory design system)
 
 | | |
 |---|---|
@@ -279,8 +288,21 @@ Timer tick (30 min)
 | **Downstream** | HTTP to browser (read-only), `/metrics` (Prometheus scrape), `/api/health` (survival distribution JSON) |
 | **Shared State** | `metrics.MeshGauges` (write), `metrics.SurvivalBuckets` (write) — computed in `packData()` on each graph render |
 | **Config** | `GEMINI_API_KEY`, `EMBEDDING_MODEL`, `EMBEDDING_DIMENSION` |
+| **Build** | `cd web/dashboard && npm run build` — produces `dist/` served by Go `http.FileServer` |
 
 **Reads from Shard:** All fields. Computes `SurvivalScoreV4` for display. Core shards get hardcoded score=100.
+
+**Frontend Components (`web/dashboard/src/`):**
+
+| Component | Purpose |
+|-----------|---------|
+| `App.jsx` | Main layout — graph, command rail, inspector, command bar, activity feed |
+| `MeshGraph.jsx` | D3 force-directed graph with solar system physics |
+| `CommandRail.jsx` | Left sidebar — search, collapsible topology, glossary (portaled), health bars |
+| `EntityInspector.jsx` | Right sidebar — grouped shard details (Identity, Metrics, Context) |
+| `CommandBar.jsx` | Bottom toolbar — camera controls, bond management |
+| `ActivityFeed.jsx` | SSE-driven real-time activity log with reconnect |
+| `design-system/` | 8 primitives (Panel, HudButton, ToolButton, Badge, DetailField, HealthBar, LogEntry, StatusDot) |
 
 **Endpoints:**
 
@@ -440,11 +462,12 @@ Every field on the `Shard` struct (`internal/storage/shard.go`), who writes it, 
 
 When you change a formula, audit every callsite listed here.
 
-### `SurvivalScoreV4` — Exponential Decay, FSRS-Calibrated
+### `SurvivalScoreV4` — Exponential Decay, FSRS-Calibrated (v4.2)
 
 ```
 S = min(95, (D*(C+1.0)*10*Sal) / e^(delta_t_days / S0))
 S0 = S_base(Sal) * (1 + A(m))
+D = max(density, 1)  // v4.2: floor at 1 to prevent cold-start eviction
 ```
 
 | Callsite | File | Inputs Source |
@@ -453,6 +476,10 @@ S0 = S_base(Sal) * (1 + A(m))
 | `GetEvictionCandidates()` | `vessel.go` | SQLite shard (defaults: centrality=0, salience=0.5, history=[]) |
 | `GetEvictionCandidates()` | `vessel_postgres.go` | Postgres shard (reads real salience + retrieval_history; centrality=0) |
 | `packData()` | `cmd/visual_ego/main.go` | Neo4j shard via GetAllShards() |
+| `handleGetShard()` | `server.go` | Neo4j shard via GetShard() — observation tool, no touch |
+| `handleGetRecentShards()` | `server.go` | Neo4j shards via GetRecentShards() — observation tool |
+| `handleGetShardsByCategory()` | `server.go` | Neo4j shards via GetShardsByCategory() — observation tool |
+| `handleGetAtRiskShards()` | `server.go` | Neo4j shards → filter by score < threshold |
 
 **Depends on:** `CalculateACTRActivation()`, `SalToStability()`, `BondCount`, `PageRank`, `Salience`, `RetrievalHistory`, `LastUsed`
 
@@ -590,8 +617,10 @@ Global state that coordinates between components. When debugging race conditions
 
 | Variable | Component(s) | Type | Default | Purpose |
 |----------|-------------|------|---------|---------|
-| `HUB_API_KEY` | MCP Server | String | (optional) | Direct auth key; if empty, no auth enforced |
+| `HUB_API_KEY` | MCP Server | String | (optional) | Direct auth key; if empty, no auth enforced. Also used as JWT signing secret |
 | `PUBLIC_URL` | MCP Server | URL | `http://localhost:8080` | OAuth redirect base URL |
+| `OAUTH_CLIENT_ID` | MCP Server (OAuth) | String | `claude-ai-connector` | Registered OAuth client ID |
+| `OAUTH_CLIENT_SECRET` | MCP Server (OAuth) | String | (required for OAuth) | OAuth client secret — validated via constant-time compare |
 | `EMBEDDING_MODE` | main.go | Enum | `none` | `none` / `server` / `local` — selects Embedder implementation |
 | `EMBEDDING_MODEL` | GeminiEmbedder | String | `gemini-embedding-001` | Gemini embedding model name |
 | `EMBEDDING_DIMENSION` | SetVectorDimension, Embedder, VesselGraph | Int | `768` | Vector dimensionality (Matryoshka truncation from 3072-D) |

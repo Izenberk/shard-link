@@ -7,7 +7,8 @@ This guide covers installation, configuration, deployment modes, authentication,
 ## 1. Prerequisites
 
 - **Docker** and **Docker Compose** (v2+)
-- **Go** 1.26+ (for the Visual Ego dashboard and local development)
+- **Go** 1.26+ (for the Visual Ego dashboard server and local development)
+- **Node.js** 18+ and **npm** (for building the Visual Ego React frontend)
 - A **Gemini API key** for embedding and summarization
 - (Optional) A **Cloudflare-managed domain** and tunnel token for remote access
 
@@ -68,6 +69,9 @@ Exposes the Hub via an encrypted **Cloudflare Tunnel** — no router port forwar
 ```bash
 # Ensure CLOUDFLARE_TUNNEL_TOKEN is in your .env
 docker compose up -d --build
+
+# Build the Visual Ego React frontend
+cd web/dashboard && npm install && npm run build && cd ../..
 
 # Start the Visual Ego Dashboard (localhost only)
 go run cmd/visual_ego/main.go
@@ -145,7 +149,7 @@ MCP tool calls enforce the following limits:
 | Query | 10,000 chars | Reject with error |
 | Result limit | 100 | Clamped silently |
 
-The `"core"` category is **blocked** from MCP callers — core shards can only be created via admin operations. Allowed categories: `memory`, `session`, `tech`, `arch`.
+Allowed categories: `core`, `memory`, `session`, `tech`, `arch`, `contract`. Mutating or deleting `core`-category shards via `update_shard` / `delete_shard` requires `confirm_core=true`.
 
 ## 5. Client Integration
 

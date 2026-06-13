@@ -30,7 +30,7 @@ The "Living Memory" is hosted in Neo4j. By utilizing the **Graph Data Science (G
 - **Topical Clustering (Louvain):** Automatically groups shards into semantic communities (neighborhoods).
 
 ### 3.3 The Protocol (MCP)
-Shard-Link exposes its capabilities via the **Model Context Protocol (MCP)**. This allows any AI agent to interact with its long-term memory as a set of standardized tools (`search_graph`, `search_memory`, `save_memory`), making the integration seamless and cross-platform.
+Shard-Link exposes its capabilities via the **Model Context Protocol (MCP)**. This allows any AI agent to interact with its long-term memory as a set of 13 standardized tools — 4 search tools (`search_memory`, `search_text`, `search_graph`, `search_all`), 6 observation tools (`get_status`, `get_shard`, `get_core_shards`, `get_recent_shards`, `get_shards_by_category`, `get_at_risk_shards`), and 3 CRUD tools (`save_memory`, `update_shard`, `delete_shard`). Authentication is handled via API key or OAuth 2.0 + PKCE (for browser-based clients like Claude.ai).
 
 ### 3.4 Triple-Engine Strategy
 Shard-Link utilizes a multi-database approach to balance intelligence, stability, and scale:
@@ -41,12 +41,12 @@ Shard-Link utilizes a multi-database approach to balance intelligence, stability
 ## 4. Autonomous Memory Management
 A finite context window requires a sophisticated eviction strategy. Shard-Link employs **The Janitor**, a background process that utilizes a mathematical survival model grounded in published cognitive science research.
 
-### 4.1 The Survival Formula (v4.1)
+### 4.1 The Survival Formula (v4.2)
 Each shard is assigned a **Survival Score (0-100)**:
 $$S = \min\left(95, \frac{D \cdot (C + 1.0) \cdot 10 \cdot Sal}{e^{\Delta t_{days} / S_0}}\right)$$
 $$S_0 = S_{base}(Sal) \cdot (1 + A(m))$$
 Where:
-- **D (Neural Density):** Number of active semantic bonds.
+- **D (Neural Density):** Number of active semantic bonds, **floored at 1** (v4.2). This prevents cold-start eviction of freshly saved, unbonded shards before The Synthesizer has a chance to link them.
 - **C (Relational Centrality):** PageRank score.
 - **Sal (Salience):** LLM-scored importance weight in `[0.1, 1.0]` (see 4.3).
 - **S_base(Sal) (FSRS-Calibrated Stability):** Maps salience to baseline stability in days — `S_base = 1.0 + (Sal - 0.1) * 14.44`. Ranges from 1 day (ephemera) to 14 days (critical knowledge).
@@ -79,11 +79,15 @@ Shards saved within the same MCP session are linked to an **Episode** node via `
 ## 5. Observability: The Visual Ego
 The **Visual Ego** dashboard provides a high-fidelity window into the agent's subconscious.
 
-### 5.1 Ergonomic HUD Design
-The v3.5 UI implements a professional "Command Center" layout:
-- **Unified Knowledge Sidebar:** Consolidation of semantic search and mesh telemetry into a single, high-signal vertical pane.
-- **Floating Command Bar:** A horizontal pill-shaped toolbar at the bottom-center for camera controls and manual bond management.
-- **Silicon Activity Feed:** A real-time terminal providing visibility into every shard save, bond forged, and janitor eviction.
+### 5.1 Neural Observatory Design System
+The dashboard is built with **React 19 + Vite 6 + D3.js**, using a custom "Neural Observatory" design system:
+- **Design Tokens:** CSS custom properties for colors, typography (Outfit font family), spacing, and effects — dark void background with dot-grid texture.
+- **Component Library:** 8 primitives (Panel, HudButton, ToolButton, Badge, DetailField, HealthBar, LogEntry, StatusDot) with consistent styling via corner brackets and accent borders.
+- **Command Rail:** Left sidebar with semantic search, collapsible mesh topology panel, survival distribution bars, community neighborhoods, and a full-viewport glossary overlay (rendered via React portal).
+- **Entity Inspector:** Right sidebar with grouped fields (Identity, Metrics, Context) and action buttons for shard refresh and eviction.
+- **Floating Command Bar:** Bottom-center toolbar for camera controls, bond management, and layout toggles.
+- **Silicon Activity Feed:** Real-time SSE-driven terminal with reconnect logic, providing visibility into every shard save, bond forged, and janitor eviction.
+- **Accessibility:** Semantic HTML (`<button>` elements), `:focus-visible` outlines, ARIA labels on all interactive elements.
 
 ### 5.2 Persistent Activity Ledger
 To ensure total transparency, Shard-Link maintains a cross-process **Activity Ledger** in SQLite. This audit trail persists across restarts and browser refreshes, allowing the user to click any historical log entry to instantly focus the camera on the associated shard.
@@ -93,10 +97,11 @@ The dashboard uses a D3.js force-directed graph with a "Solar System" physics mo
 - **Core Hubs:** Anchored to the center with high gravitational strength.
 - **Semantic Constellations:** Regular shards orbit their nearest anchors based on bond strength.
 - **Neural Pulse:** Visual animations (glows and blooms) represent active data flows and high-importance nodes.
+- **Survival Distribution:** 5-tier color-coded horizontal bars (Critical ≤20, Low ≤50, Medium ≤80, Healthy ≤95, Peak ≤100) — auto-refreshes every 15 seconds.
 
 ## 6. Conclusion
 Shard-Link represents a shift toward **Standalone Agent Intelligence**. By offloading memory management to a dedicated, autonomous engine, we enable AI agents to maintain a consistent personality, deep historical context, and evolving knowledge bases that mirror the complexity of human cognition.
 
 ---
-*Technical Whitepaper v2.0 | 2026-05-29*
+*Technical Whitepaper v3.0 | 2026-06-13*
 *Architects: Bytey Bestie & Izenberk*
