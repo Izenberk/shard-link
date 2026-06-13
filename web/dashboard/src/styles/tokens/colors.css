@@ -1,14 +1,24 @@
-/* Shard-Link Color Tokens */
+/* Shard-Link Color Tokens — Neural Observatory */
 :root {
   --bg-color: #06090f;
-  --panel-bg: rgba(6, 9, 15, 0.9);
-  --panel-border: rgba(88, 166, 255, 0.3);
+  --bg-grid: rgba(94, 243, 255, 0.03);
+  --panel-bg: rgba(8, 14, 24, 0.88);
+  --panel-border: rgba(88, 166, 255, 0.18);
+  --panel-border-hover: rgba(94, 243, 255, 0.35);
   --text-main: #c9d1d9;
-  --text-muted: #8b949e;
+  --text-muted: #6e7681;
   --accent: #5ef3ff;
+  --accent-dim: rgba(94, 243, 255, 0.08);
+  --accent-mid: rgba(94, 243, 255, 0.15);
   --shard-glow: #00d4ff;
   --doc-glow: #ff7b3a;
   --core-color: #ff9b3a;
+  --core-dim: rgba(255, 155, 58, 0.12);
+
+  /* Gradient accents */
+  --grad-accent: linear-gradient(135deg, #5ef3ff 0%, #58a6ff 100%);
+  --grad-warm: linear-gradient(135deg, #ff9b3a 0%, #ff5e62 100%);
+  --grad-panel-border: linear-gradient(180deg, rgba(94, 243, 255, 0.25) 0%, rgba(88, 166, 255, 0.06) 100%);
 
   /* Log type colors */
   --log-success: #00ff88;

@@ -1,14 +1,16 @@
-/* Shard-Link Effect Tokens */
+/* Shard-Link Effect Tokens — Neural Observatory */
 :root {
-  --blur-panel: blur(10px);
-  --blur-heavy: blur(20px);
+  --blur-panel: blur(12px);
+  --blur-heavy: blur(24px);
   --blur-max: blur(30px);
 
-  --shadow-accent: 0 0 10px rgba(94, 243, 255, 0.3);
-  --shadow-glow: 0 0 30px rgba(94, 243, 255, 0.2);
-  --shadow-toolbar: 0 5px 25px rgba(0, 0, 0, 0.5);
+  --shadow-accent: 0 0 12px rgba(94, 243, 255, 0.25);
+  --shadow-glow: 0 0 40px rgba(94, 243, 255, 0.15);
+  --shadow-toolbar: 0 8px 32px rgba(0, 0, 0, 0.6);
+  --shadow-panel: 0 4px 24px rgba(0, 0, 0, 0.4);
 
-  --transition-default: all 0.2s;
-  --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-slide: transform 0.3s ease;
+  --transition-default: all 0.2s ease;
+  --transition-smooth: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slide: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-spring: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
 }

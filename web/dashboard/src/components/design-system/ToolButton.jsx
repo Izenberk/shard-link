@@ -1,7 +1,13 @@
 export default function ToolButton({ children, onClick, title, style }) {
   return (
-    <div className="tool-btn" onClick={onClick} title={title} style={style}>
+    <button
+      className="tool-btn"
+      onClick={onClick}
+      title={title}
+      style={style}
+      type="button"
+    >
       {children}
-    </div>
+    </button>
   )
 }

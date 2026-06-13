@@ -14,24 +14,52 @@
     body {
       margin: 0;
       background: #06090f;
+      background-image: radial-gradient(rgba(94, 243, 255, 0.03) 1px, transparent 1px);
+      background-size: 24px 24px;
       font-family: 'JetBrains Mono', monospace;
       overflow: hidden;
     }
     #splash {
       height: 100vh;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
-      color: #5ef3ff;
-      font-size: 14px;
-      letter-spacing: 2px;
+      gap: 16px;
     }
-    #splash .blink {
-      animation: pulse 1.2s ease-in-out infinite;
+    #splash .logo-mark {
+      width: 48px;
+      height: 48px;
+      border: 2px solid rgba(94, 243, 255, 0.3);
+      border-radius: 50%;
+      position: relative;
+      animation: ringExpand 2s ease-in-out infinite;
+    }
+    #splash .logo-mark::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 8px;
+      height: 8px;
+      background: #5ef3ff;
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      box-shadow: 0 0 12px #5ef3ff;
+    }
+    #splash .init-text {
+      color: #5ef3ff;
+      font-size: 11px;
+      letter-spacing: 3px;
+      animation: pulse 1.5s ease-in-out infinite;
     }
     @keyframes pulse {
-      0%, 100% { opacity: 0.4; }
+      0%, 100% { opacity: 0.3; }
       50% { opacity: 1; }
+    }
+    @keyframes ringExpand {
+      0%, 100% { transform: scale(1); border-color: rgba(94, 243, 255, 0.3); }
+      50% { transform: scale(1.08); border-color: rgba(94, 243, 255, 0.6); }
     }
   </style>
 </head>
@@ -39,7 +67,8 @@
   <div id="root">
     <!-- Splash: painted immediately by the browser, replaced when React mounts -->
     <div id="splash">
-      <span class="blink">INITIALIZING_MESH...</span>
+      <div class="logo-mark"></div>
+      <span class="init-text">INITIALIZING_MESH</span>
     </div>
   </div>
   <script type="module" src="/src/main.jsx"></script>

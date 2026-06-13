@@ -1,7 +1,7 @@
 /* Shard-Link Typography Tokens */
 :root {
   --font-mono: 'JetBrains Mono', monospace;
-  --font-sans: 'Inter', sans-serif;
+  --font-sans: 'Outfit', system-ui, sans-serif;
 
   --fs-xs: 8px;
   --fs-sm: 9px;
@@ -13,5 +13,5 @@
 
   --ls-tight: 1px;
   --ls-normal: 1.5px;
-  --ls-wide: 2px;
+  --ls-wide: 2.5px;
 }

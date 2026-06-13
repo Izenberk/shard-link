@@ -1,4 +1,4 @@
 /* Shard-Link Font Loading
    JetBrains Mono is preloaded in index.html for fast LCP.
-   Inter is loaded here for content areas (detail panel, etc.) */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
+   Outfit replaces Inter — geometric, modern, distinctive for content areas. */
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&display=swap');
