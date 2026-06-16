@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -232,10 +233,10 @@ func (s *Server) handleEvict(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1b. Immutable Protection: Core shards cannot be evicted
-	if shard.Category == "core" {
-		log.Printf("[API WARN] Blocked eviction attempt of CORE shard: %s", id)
-		http.Error(w, "Immutable Protection: CORE shards cannot be evicted.", http.StatusForbidden)
+	// 1b. Immutable Protection: Core and Community shards cannot be evicted via UI
+	if shard.Category == "core" || shard.Category == "community" {
+		log.Printf("[API WARN] Blocked eviction attempt of %s shard: %s", shard.Category, id)
+		http.Error(w, fmt.Sprintf("Immutable Protection: %s shards cannot be evicted.", strings.ToUpper(shard.Category)), http.StatusForbidden)
 		return
 	}
 

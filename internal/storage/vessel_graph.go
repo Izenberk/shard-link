@@ -263,7 +263,7 @@ func (v *VesselGraph) GetEvictionCandidates(ctx context.Context, limit int) ([]s
 	// No ordering or limit in Cypher — Go handles ranking via SurvivalScoreV4.
 	candidateQuery := `
 	MATCH (core:Shard {category: 'core'})
-	MATCH (s:Shard) WHERE s.category <> 'core'
+	MATCH (s:Shard) WHERE s.category <> 'core' AND s.category <> 'community'
 	WITH s, core, gds.similarity.cosine(s.embedding, core.embedding) as sim
 	WITH s, max(sim) as maxResonance
 	WHERE maxResonance < toFloat($threshold)
@@ -999,7 +999,7 @@ func (v *VesselGraph) FindInvalidShards(ctx context.Context) ([]string, error) {
 func (v *VesselGraph) FindOrphanShards(ctx context.Context) ([]string, error) {
 	query := `
 	MATCH (s:Shard)
-	WHERE s.category <> 'core'
+	WHERE s.category <> 'core' AND s.category <> 'community'
 		AND NOT (s)-[:CONNECTED_TO]-()
 	RETURN s.id AS id
 	`
@@ -1166,7 +1166,7 @@ func (v *VesselGraph) GetAtRiskShards(ctx context.Context, limit int, threshold 
 	// No Cypher-side filtering on survival — it's computed in Go.
 	query := `
 	MATCH (s:Shard)
-	WHERE s.category <> 'core' AND s.category <> 'archived'
+	WHERE s.category <> 'core' AND s.category <> 'community' AND s.category <> 'archived'
 	OPTIONAL MATCH (s)-[r:CONNECTED_TO]-()
 	RETURN s, count(r) AS degree
 	`

@@ -13,8 +13,11 @@ import 'd3-transition' // side-effect: enables .transition() on selections
 export const COMM_COLORS = ['#5ef3ff', '#00d4ff', '#70a1ff', '#a371f7', '#58a6ff']
 const color = scaleOrdinal(COMM_COLORS)
 
+const COMMUNITY_COLOR = '#e8b84b'
+
 function nodeRadius(d) {
   if (d.category === 'core') return 12
+  if (d.category === 'community') return 9
   if (d.category === 'archived') return 4
   const baseRadius = 5
   const scaleFactor = 15
@@ -23,6 +26,7 @@ function nodeRadius(d) {
 
 function survivalGlow(d) {
   if (d.category === 'core') return 'drop-shadow(0 0 10px var(--core-color))'
+  if (d.category === 'community') return `drop-shadow(0 0 8px ${COMMUNITY_COLOR})`
   if (d.category === 'archived') return 'drop-shadow(0 0 6px rgba(255,255,255,0.5))'
   const s = d.survival || 0
   const baseColor = color(d.community)
@@ -33,6 +37,7 @@ function survivalGlow(d) {
 
 function nodeFill(d) {
   if (d.category === 'core') return 'var(--core-color)'
+  if (d.category === 'community') return COMMUNITY_COLOR
   if (d.category === 'archived') return '#fff'
   return color(d.community)
 }
@@ -162,16 +167,20 @@ export default function MeshGraph({
         .id(d => d.id)
         .distance(d => {
           const w = d.weight || 0.5
-          return 220 - (w * 80)
+          const involvesCore = d.source.category === 'core' || d.target.category === 'core'
+          // Core bonds push the first ring far out — non-core bonds keep clusters tighter
+          return involvesCore ? 340 - (w * 60) : 180 - (w * 50)
         })
-        .strength(0.08))   // very soft bonds — shards drift apart slowly after disturbance
+        .strength(0.08))
       .force('charge', forceManyBody()
         .strength(d => {
+          if (d.category === 'core') return -600  // cores repel each other — spread into constellation at center
+          if (d.category === 'community') return -250  // summary nodes float within their cluster
           if (d.category === 'archived') return 0
           const bonds = degreeRef.current[d.id] || 0
-          if (bonds === 0) return -100
-          if (bonds <= 2) return -250
-          return -450
+          if (bonds === 0) return -150
+          if (bonds <= 2) return -320
+          return -500
         }))
       .force('center', forceCenter(width / 2, height / 2).strength(0.02))
       .force('collision', forceCollide().radius(d => {
@@ -181,7 +190,8 @@ export default function MeshGraph({
       .force('cluster', forceCluster)
       .force('archival', forceArchival)
       .force('x', forceX(width / 2).strength(d => {
-        if (d.category === 'core') return 0.5
+        if (d.category === 'core') return 0.65
+        if (d.category === 'community') return 0  // floats freely — positioned by bonds to its cluster
         if (d.category === 'archived') return 0
         const bonds = degreeRef.current[d.id] || 0
         if (bonds === 0) return 0.05
@@ -189,7 +199,8 @@ export default function MeshGraph({
         return 0.005
       }))
       .force('y', forceY(height / 2).strength(d => {
-        if (d.category === 'core') return 0.5
+        if (d.category === 'core') return 0.65
+        if (d.category === 'community') return 0
         if (d.category === 'archived') return 0
         const bonds = degreeRef.current[d.id] || 0
         if (bonds === 0) return 0.05
@@ -226,7 +237,8 @@ export default function MeshGraph({
       svg.attr('width', w).attr('height', h)
       simulation.force('center', forceCenter(w / 2, h / 2).strength(0.02))
       simulation.force('x', forceX(w / 2).strength(d => {
-        if (d.category === 'core') return 0.5
+        if (d.category === 'core') return 0.65
+        if (d.category === 'community') return 0
         if (d.category === 'archived') return 0
         const bonds = degreeRef.current[d.id] || 0
         if (bonds === 0) return 0.05
@@ -234,7 +246,8 @@ export default function MeshGraph({
         return 0.005
       }))
       simulation.force('y', forceY(h / 2).strength(d => {
-        if (d.category === 'core') return 0.5
+        if (d.category === 'core') return 0.65
+        if (d.category === 'community') return 0
         if (d.category === 'archived') return 0
         const bonds = degreeRef.current[d.id] || 0
         if (bonds === 0) return 0.05
@@ -280,8 +293,8 @@ export default function MeshGraph({
       .data(data.links, d => `${d.source.id || d.source}-${d.target.id || d.target}`)
       .join('line')
       .attr('class', 'link active')
-      .style('stroke-width', d => Math.pow(d.weight, 2) * 2 + 1 + 'px')
-      .style('stroke-opacity', d => Math.max(0.1, d.weight * 0.35))
+      .style('stroke-width', d => Math.pow(d.weight, 2) * 1.2 + 0.3 + 'px')
+      .style('stroke-opacity', d => Math.max(0.04, d.weight * 0.14))
 
     link.on('mouseenter', (event, d) => {
       if (!tooltipEl) return
@@ -445,7 +458,7 @@ export default function MeshGraph({
     if (!focusedNodeId) {
       node.style('opacity', 1).attr('fill', nodeFill).style('filter', survivalGlow)
       node.style('stroke', 'none')
-      link.style('stroke-opacity', d => Math.max(0.1, d.weight * 0.35))
+      link.style('stroke-opacity', d => Math.max(0.04, d.weight * 0.14))
       if (hud) hud.selectAll('*').remove()
       return
     }

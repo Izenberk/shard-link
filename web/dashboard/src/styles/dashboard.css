@@ -662,6 +662,7 @@ body {
 .node-tooltip .tooltip-category.memory { background: var(--accent-dim); color: var(--accent); }
 .node-tooltip .tooltip-category.session { background: rgba(163, 113, 247, 0.15); color: var(--log-search); }
 .node-tooltip .tooltip-category.archived { background: rgba(255, 255, 255, 0.1); color: #ffffff; }
+.node-tooltip .tooltip-category.community { background: rgba(232, 184, 75, 0.15); color: #e8b84b; }
 .node-tooltip .tooltip-content { color: var(--text-muted); font-size: var(--fs-base); word-break: break-word; }
 
 /* === Glossary Overlay === */
@@ -777,6 +778,11 @@ button.hud-btn:disabled {
 .legend-color--archived {
   background: #ffffff;
   box-shadow: 0 0 8px rgba(255, 255, 255, 0.6);
+}
+.legend-community { color: #e8b84b; }
+.legend-color--community {
+  background: #e8b84b;
+  box-shadow: 0 0 8px rgba(232, 184, 75, 0.7);
 }
 .legend-color-group {
   display: flex;

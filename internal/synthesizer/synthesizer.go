@@ -196,7 +196,7 @@ func (s *Synthesizer) summarizeCommunities(parentCtx context.Context, communityI
 		shardID := fmt.Sprintf("comm-summary-%d", cid)
 		shard := storage.Shard{
 			ID:       shardID,
-			Category: "core",
+			Category: "community",
 			Content:  summary,
 			Vector:   storage.EncodeVector(vec),
 			Metadata: []byte(fmt.Sprintf(`{"community_id":%d,"member_count":%d}`, cid, len(members))),

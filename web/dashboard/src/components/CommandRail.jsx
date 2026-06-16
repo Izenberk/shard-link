@@ -12,6 +12,7 @@ const GLOSSARY = [
   { label: 'RELATIONAL_COMMUNITY', text: 'Louvain clustering ID (N_#). Shards in the same community share a distinct semantic domain. Updated every ~10 min by The Synthesizer.\n\nCommunities > size threshold get LLM-synthesized summaries. Click a community badge to view its summary.' },
   { label: 'MESH_SENSITIVITY', text: 'Minimum cosine similarity for auto-bonding (MESH_LINK_THRESHOLD). Default: 0.75.\n\n• > 0.85: Strong semantic match.\n• 0.75-0.85: Bond created at threshold.\n• < 0.75: No automatic bond.\n\nLink tooltip shows SIM: the actual cosine similarity weight of each bond.' },
   { label: 'IDENTITY_ANCHOR', text: 'Immutable "Core" shards — survival locked at 100, immune to Janitor eviction. Represent foundational user identity.\n\nNon-core shards with cosine similarity ≥ 0.70 to any core shard receive resonance protection from eviction.' },
+  { label: 'COMMUNITY_DIGEST', text: 'System-managed synthesis shards (comm-summary-*) created by The Synthesizer. Each digest distills the collective knowledge of a semantic community into a single LLM-generated paragraph.\n\n• Immune to Janitor eviction (category: community).\n• Shown in amber — distinct from Core (white) and member shards (community colors).\n• Float freely within their cluster — positioned by bonds, not center gravity.\n• Not user-assignable via MCP. Regenerated automatically on community change.' },
   { label: 'THE_JANITOR', text: 'Background eviction process. Scans for shards below the resonance threshold (default: 0.70) and with low survival scores.\n\nProtected from eviction:\n• Core shards (always).\n• Shards resonant to core (cosine ≥ 0.70).\n• Shards above survival threshold.' },
   { label: 'THE_SYNTHESIZER', text: 'Background linker that autonomously bonds resonant shards. Runs every ~10 minutes:\n\n1. Computes cosine similarity between shard embeddings.\n2. Creates CONNECTED_TO bonds above MESH_SENSITIVITY.\n3. Runs Louvain community detection.\n4. Runs PageRank for centrality scoring.\n5. Generates LLM summaries for large communities.' },
   { label: 'RESONANT_BONDS', text: 'Associative connections formed when two shards exceed the cosine similarity threshold.\n\n• Weight: Cosine similarity (0.00–1.00). Higher = stronger resonance.\n• Dots (●●●○○): Peer survival score. Fewer filled dots = peer is fading toward eviction.\n• Click any bond to follow the association to the connected shard.' },
@@ -115,6 +116,10 @@ export default function CommandRail({
           <div className="legend-item legend-archived">
             <div className="legend-color legend-color--archived" />
             ARCHIVED_MEMORY
+          </div>
+          <div className="legend-item legend-community">
+            <div className="legend-color legend-color--community" />
+            COMMUNITY_DIGEST
           </div>
           <div className="legend-item">
             <div className="legend-color-group">

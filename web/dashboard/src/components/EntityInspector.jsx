@@ -20,7 +20,7 @@ function survivalDotColor(score) {
 export default function EntityInspector({ node, degree, links, nodes, onClose, onEvict, onRefreshMetrics, onSelectNode }) {
   if (!node) return null
 
-  const isEvictable = node.category !== 'core' && node.category !== 'archived'
+  const isEvictable = node.category !== 'core' && node.category !== 'community' && node.category !== 'archived'
 
   const resonantLinks = links
     ? links
