@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
+import BackgroundField from './components/BackgroundField'
 import MeshGraph from './components/MeshGraph'
 import CommandRail from './components/CommandRail'
 import EntityInspector from './components/EntityInspector'
@@ -194,6 +195,7 @@ export default function App() {
 
   return (
     <>
+      <BackgroundField />
       {/* D3 Graph */}
       <MeshGraph
         data={data}

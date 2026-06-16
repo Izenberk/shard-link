@@ -14,6 +14,64 @@ body {
   background-size: 24px 24px;
 }
 
+/* === Background Field === */
+.bg-nebula {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.bg-nebula-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(60px);
+  will-change: transform; /* promotes to GPU compositor layer — no repaint per frame */
+}
+
+.bg-nebula-blob--1 {
+  width: 60vw;
+  height: 55vh;
+  background: radial-gradient(circle, rgba(94, 243, 255, 0.055) 0%, transparent 70%);
+  top: -15%;
+  left: 10%;
+  animation: nebula1 32s ease-in-out infinite alternate;
+}
+
+.bg-nebula-blob--2 {
+  width: 50vw;
+  height: 50vh;
+  background: radial-gradient(circle, rgba(88, 166, 255, 0.045) 0%, transparent 70%);
+  bottom: -10%;
+  right: 5%;
+  animation: nebula2 40s ease-in-out infinite alternate;
+}
+
+.bg-nebula-blob--3 {
+  width: 38vw;
+  height: 38vh;
+  background: radial-gradient(circle, rgba(163, 113, 247, 0.035) 0%, transparent 70%);
+  top: 35%;
+  left: 50%;
+  animation: nebula3 25s ease-in-out infinite alternate;
+}
+
+@keyframes nebula1 {
+  0%   { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(6%, 9%) scale(1.12); }
+}
+
+@keyframes nebula2 {
+  0%   { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(-7%, -6%) scale(1.09); }
+}
+
+@keyframes nebula3 {
+  0%   { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(5%, -8%) scale(0.9); }
+}
+
 /* === SVG Elements === */
 .node {
   stroke-width: 0;

@@ -126,8 +126,8 @@ export default function MeshGraph({
       nodes.forEach(n => {
         const c = centroids[n.community]
         if (c) {
-          n.vx += (c.x - n.x) * alpha * 0.15
-          n.vy += (c.y - n.y) * alpha * 0.15
+          n.vx += (c.x - n.x) * alpha * 0.06
+          n.vy += (c.y - n.y) * alpha * 0.06
         }
       })
     }
@@ -156,22 +156,24 @@ export default function MeshGraph({
     }
 
     const simulation = forceSimulation()
+      .alphaDecay(0.02)    // slightly slower than default (0.0228) — graceful settling
+      .velocityDecay(0.45) // slightly more damping than default (0.4) — stops oscillation
       .force('link', forceLink()
         .id(d => d.id)
         .distance(d => {
           const w = d.weight || 0.5
-          return 220 - (w * 80) // range: ~140 (strong bond) to ~220 (weak bond)
+          return 220 - (w * 80)
         })
-        .strength(0.4))
+        .strength(0.08))   // very soft bonds — shards drift apart slowly after disturbance
       .force('charge', forceManyBody()
         .strength(d => {
           if (d.category === 'archived') return 0
           const bonds = degreeRef.current[d.id] || 0
-          if (bonds === 0) return -300
-          if (bonds <= 2) return -800
-          return -1400
+          if (bonds === 0) return -100
+          if (bonds <= 2) return -250
+          return -450
         }))
-      .force('center', forceCenter(width / 2, height / 2).strength(0.08))
+      .force('center', forceCenter(width / 2, height / 2).strength(0.02))
       .force('collision', forceCollide().radius(d => {
         if (d.category === 'archived') return 10
         return (degreeRef.current[d.id] || 0) * 2 + 38
@@ -179,20 +181,20 @@ export default function MeshGraph({
       .force('cluster', forceCluster)
       .force('archival', forceArchival)
       .force('x', forceX(width / 2).strength(d => {
-        if (d.category === 'core') return 0.6
+        if (d.category === 'core') return 0.25
         if (d.category === 'archived') return 0
         const bonds = degreeRef.current[d.id] || 0
-        if (bonds === 0) return 0.15
-        if (bonds <= 2) return 0.06
-        return 0.03
+        if (bonds === 0) return 0.05
+        if (bonds <= 2) return 0.015
+        return 0.005
       }))
       .force('y', forceY(height / 2).strength(d => {
-        if (d.category === 'core') return 0.6
+        if (d.category === 'core') return 0.25
         if (d.category === 'archived') return 0
         const bonds = degreeRef.current[d.id] || 0
-        if (bonds === 0) return 0.15
-        if (bonds <= 2) return 0.06
-        return 0.03
+        if (bonds === 0) return 0.05
+        if (bonds <= 2) return 0.015
+        return 0.005
       }))
 
     simulation.on('tick', () => {
@@ -222,22 +224,22 @@ export default function MeshGraph({
       const w = window.innerWidth
       const h = window.innerHeight
       svg.attr('width', w).attr('height', h)
-      simulation.force('center', forceCenter(w / 2, h / 2).strength(0.08))
+      simulation.force('center', forceCenter(w / 2, h / 2).strength(0.04))
       simulation.force('x', forceX(w / 2).strength(d => {
-        if (d.category === 'core') return 0.6
+        if (d.category === 'core') return 0.25
         if (d.category === 'archived') return 0
         const bonds = degreeRef.current[d.id] || 0
-        if (bonds === 0) return 0.15
-        if (bonds <= 2) return 0.06
-        return 0.03
+        if (bonds === 0) return 0.05
+        if (bonds <= 2) return 0.015
+        return 0.005
       }))
       simulation.force('y', forceY(h / 2).strength(d => {
-        if (d.category === 'core') return 0.6
+        if (d.category === 'core') return 0.25
         if (d.category === 'archived') return 0
         const bonds = degreeRef.current[d.id] || 0
-        if (bonds === 0) return 0.15
-        if (bonds <= 2) return 0.06
-        return 0.03
+        if (bonds === 0) return 0.05
+        if (bonds <= 2) return 0.015
+        return 0.005
       }))
       simulation.alpha(0.3).restart()
     }
@@ -317,7 +319,7 @@ export default function MeshGraph({
           .style('filter', survivalGlow)
           .call(d3Drag()
             .on('start', (event) => {
-              if (!event.active) simulation.alphaTarget(0.05).restart()
+              if (!event.active) simulation.alphaTarget(0.02).restart()
               event.subject.fx = event.subject.x
               event.subject.fy = event.subject.y
             })
@@ -326,7 +328,7 @@ export default function MeshGraph({
               event.subject.fy = event.y
             })
             .on('end', (event) => {
-              if (!event.active) simulation.alphaTarget(0).alpha(0.08)
+              if (!event.active) simulation.alphaTarget(0).alpha(0.05)
               event.subject.fx = null
               event.subject.fy = null
             })
@@ -513,7 +515,7 @@ export default function MeshGraph({
       <svg
         ref={svgRef}
         className={bondMode ? 'bond-mode-active' : ''}
-        style={{ position: 'absolute', top: 0, left: 0 }}
+        style={{ position: 'fixed', top: 0, left: 0, zIndex: 2 }}
       />
       {/* Tooltip portal — positioned fixed, rendered once */}
       <div className="node-tooltip" style={{ display: 'none' }}>
