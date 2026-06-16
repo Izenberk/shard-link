@@ -396,7 +396,6 @@ body {
   animation: toolbarRise 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.3s both;
 }
 .bottom-toolbar:hover {
-  animation: none;
   border-color: var(--panel-border-hover);
 }
 .toolbar-group { display: flex; gap: 8px; }

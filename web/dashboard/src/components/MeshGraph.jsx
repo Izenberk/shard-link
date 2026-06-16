@@ -64,6 +64,7 @@ export default function MeshGraph({
   const bondSourceRef = useRef(null)
   const initialZoomApplied = useRef(false)
   const initialTransformRef = useRef(zoomIdentity)
+  const focusedNodeIdRef = useRef(focusedNodeId)
 
   // Build adjacency map
   const buildAdjacencyMap = useCallback((links) => {
@@ -201,6 +202,17 @@ export default function MeshGraph({
         .attr('x2', d => d.target.x).attr('y2', d => d.target.y)
       nodeRef.current
         .attr('cx', d => d.x).attr('cy', d => d.y)
+
+      // Track selection box with focused node on every tick
+      if (hudLayerRef.current && focusedNodeIdRef.current) {
+        const focused = simulation.nodes().find(n => n.id === focusedNodeIdRef.current)
+        if (focused && !isNaN(focused.x)) {
+          const boxSize = nodeRadius(focused) * 3.5
+          hudLayerRef.current.select('rect.selection-box')
+            .attr('x', focused.x - boxSize / 2)
+            .attr('y', focused.y - boxSize / 2)
+        }
+      }
     })
 
     simulationRef.current = simulation
@@ -305,7 +317,7 @@ export default function MeshGraph({
           .style('filter', survivalGlow)
           .call(d3Drag()
             .on('start', (event) => {
-              if (!event.active) simulation.alphaTarget(0.3).restart()
+              if (!event.active) simulation.alphaTarget(0.05).restart()
               event.subject.fx = event.subject.x
               event.subject.fy = event.subject.y
             })
@@ -314,7 +326,7 @@ export default function MeshGraph({
               event.subject.fy = event.y
             })
             .on('end', (event) => {
-              if (!event.active) simulation.alphaTarget(0)
+              if (!event.active) simulation.alphaTarget(0).alpha(0.08)
               event.subject.fx = null
               event.subject.fy = null
             })
@@ -365,6 +377,19 @@ export default function MeshGraph({
 
     // Update simulation — match vanilla logic:
     // 'structure' = full re-layout (alpha 0.5), 'metrics' = gentle nudge (alpha 0.01)
+    // Pre-position nodes that have no position yet (first load) in a circle around
+    // viewport center — prevents D3's default phyllotaxis near (0,0) causing a
+    // visible "big bang" explosion from the top-left corner on page load.
+    const cx = window.innerWidth / 2
+    const cy = window.innerHeight / 2
+    data.nodes.forEach((n, i) => {
+      if (n.x == null) {
+        const angle = (2 * Math.PI * i) / data.nodes.length
+        n.x = cx + 220 * Math.cos(angle)
+        n.y = cy + 220 * Math.sin(angle)
+      }
+    })
+
     simulation.nodes(data.nodes)
     simulation.force('link').links(data.links)
 
@@ -390,22 +415,23 @@ export default function MeshGraph({
       simulation.alpha(0.01).restart()
     }
 
-    // Re-apply focus if a node is selected
-    if (focusedNodeId) {
+    // Re-apply focus styling after data refresh using ref (avoids restarting simulation on click)
+    const fid = focusedNodeIdRef.current
+    if (fid) {
       const adj = adjMapRef.current
       node.style('opacity', n => {
-        if (n.id === focusedNodeId || adj.get(focusedNodeId)?.has(n.id)) return 1
+        if (n.id === fid || adj.get(fid)?.has(n.id)) return 1
         return 0.05
       })
       link.style('stroke-opacity', l => {
         const sID = l.source.id || l.source
         const tID = l.target.id || l.target
-        return (sID === focusedNodeId || tID === focusedNodeId) ? 0.8 : 0.01
+        return (sID === fid || tID === fid) ? 0.8 : 0.01
       })
-      node.style('stroke', n => n.id === focusedNodeId ? 'var(--accent)' : 'none')
-      node.style('stroke-width', n => n.id === focusedNodeId ? '3px' : '0')
+      node.style('stroke', n => n.id === fid ? 'var(--accent)' : 'none')
+      node.style('stroke-width', n => n.id === fid ? '3px' : '0')
     }
-  }, [data, changeType, bondMode, focusedNodeId, buildAdjacencyMap, onSelectNode, onBondCreated])
+  }, [data, changeType, bondMode, buildAdjacencyMap, onSelectNode, onBondCreated])
 
   // Apply focus dimming when focusedNodeId changes
   useEffect(() => {
@@ -451,6 +477,11 @@ export default function MeshGraph({
       }
     }
   }, [focusedNodeId, data])
+
+  // Keep ref in sync so tick handler can read focusedNodeId without stale closure
+  useEffect(() => {
+    focusedNodeIdRef.current = focusedNodeId
+  }, [focusedNodeId])
 
   // Reset bond source when bond mode toggled off
   useEffect(() => {
