@@ -181,7 +181,7 @@ export default function MeshGraph({
       .force('cluster', forceCluster)
       .force('archival', forceArchival)
       .force('x', forceX(width / 2).strength(d => {
-        if (d.category === 'core') return 0.25
+        if (d.category === 'core') return 0.5
         if (d.category === 'archived') return 0
         const bonds = degreeRef.current[d.id] || 0
         if (bonds === 0) return 0.05
@@ -189,7 +189,7 @@ export default function MeshGraph({
         return 0.005
       }))
       .force('y', forceY(height / 2).strength(d => {
-        if (d.category === 'core') return 0.25
+        if (d.category === 'core') return 0.5
         if (d.category === 'archived') return 0
         const bonds = degreeRef.current[d.id] || 0
         if (bonds === 0) return 0.05
@@ -224,9 +224,9 @@ export default function MeshGraph({
       const w = window.innerWidth
       const h = window.innerHeight
       svg.attr('width', w).attr('height', h)
-      simulation.force('center', forceCenter(w / 2, h / 2).strength(0.04))
+      simulation.force('center', forceCenter(w / 2, h / 2).strength(0.02))
       simulation.force('x', forceX(w / 2).strength(d => {
-        if (d.category === 'core') return 0.25
+        if (d.category === 'core') return 0.5
         if (d.category === 'archived') return 0
         const bonds = degreeRef.current[d.id] || 0
         if (bonds === 0) return 0.05
@@ -234,7 +234,7 @@ export default function MeshGraph({
         return 0.005
       }))
       simulation.force('y', forceY(h / 2).strength(d => {
-        if (d.category === 'core') return 0.25
+        if (d.category === 'core') return 0.5
         if (d.category === 'archived') return 0
         const bonds = degreeRef.current[d.id] || 0
         if (bonds === 0) return 0.05
