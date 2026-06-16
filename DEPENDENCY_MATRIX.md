@@ -5,7 +5,7 @@
 >
 > Think of this as a P&ID diagram — every component is a node, every data flow is a pipe.
 >
-> **Last Updated:** 2026-06-13
+> **Last Updated:** 2026-06-17
 
 ---
 
@@ -110,7 +110,7 @@ Each card lists: what the component does, what feeds into it (upstream), what it
 | `search_text` | FindText → WorkingMemory.Update | Yes | No embedding needed |
 | `search_graph` | Embedder.Embed → WorkingMemory.Bias → SearchGraph → WorkingMemory.Update | Yes | Multi-hop traversal, touches center + neighbors |
 | `search_all` | FindText(false) + FindResonant(false) + SearchGraph(false) → deduplicate → ReinforceShards | Yes (unified) | Avoids double-touch via dedup + single ReinforceShards call |
-| `save_memory` | Embedder.Embed → Summarizer.Summarize (salience) → SaveShard → Episode linking | N/A | Sets salience, increments dirtyShardCount, creates Episode node (Neo4j) |
+| `save_memory` | Embedder.Embed → Summarizer.Summarize (salience) → SaveShard → Episode linking | N/A | Sets salience, increments dirtyShardCount, creates Episode node (Neo4j). Rejects `core` and `community` category assignments from external callers. |
 | `get_status` | GetCount, GetBondCount, GetCommunityCount, Ping (all backends) | No | Returns mesh stats + service health as JSON |
 | `get_shard` | GetShard(id) → compute SurvivalScoreV4 | No | Single shard metadata lookup — no touch |
 | `get_core_shards` | GetCoreShards() | No | Lists all identity anchors |
@@ -197,23 +197,27 @@ Each card lists: what the component does, what feeds into it (upstream), what it
 
 | | |
 |---|---|
-| **Upstream** | Timer (15 min), Repository.GetCount(), Repository.GetEvictionCandidates() |
-| **Downstream** | Repository.ArchiveShard() (Neo4j: DETACH DELETE, SQLite: move to archive table), Repository.Optimize(), Metrics (`JanitorEvictionsTotal`, `JanitorCycleLatency`) |
+| **Upstream** | Timer (15 min) + `RunForced()` (Visual Ego `/api/janitor/run`), Repository.GetCount(), Repository.GetEvictionCandidates() |
+| **Downstream** | PostgresVessel.SaveArchivedShard() (White Dwarf archive first), then Repository.ArchiveShard() (Neo4j: DETACH DELETE, SQLite: move to archive table), Repository.Optimize(), Metrics (`JanitorEvictionsTotal`, `JanitorCycleLatency`) |
 | **Shared State** | `GlobalLogger` (write activity events), `metrics.JanitorEvictionsTotal`, `metrics.JanitorCycleLatency` |
 | **Config** | `JANITOR_RESONANCE_THRESHOLD` (default 0.70), Max shards = 1000, Interval = 15 min |
 
 **Eviction Chain:**
 
 ```
-Timer tick (15 min)
+Timer tick (15 min) OR RunForced() API call
   → GetCount() — check if over limit
   → GetEvictionCandidates(overage)
-      → Cypher: filter non-core + resonance < threshold
+      → Cypher: filter non-core + non-community + resonance < threshold
       → Go: SurvivalScoreV4(bondCount, pagerank, salience, retrievalHistory, lastUsed)
       → Sort ascending, return lowest N
-  → ArchiveShard() × N — remove from living mesh
+  → evictShard(id) × N
+      → [if archiver != nil] SaveArchivedShard(shard) — White Dwarf backup first
+      → ArchiveShard(id) — remove from living mesh
   → Optimize() — compact storage
 ```
+
+**Protected from eviction:** `core` (permanent identity), `community` (system-managed digests), shards resonant to core (cosine ≥ threshold)
 
 **Reads from Shard:** `Category`, `BondCount`, `PageRank`, `Salience`, `RetrievalHistory`, `LastUsed`
 
@@ -252,7 +256,7 @@ Timer tick (30 min)
 ```
 
 **Reads from Shard:** `Vector` (pairwise similarity), `Content`, `ID`, `Category`, `PageRank` (ordering)
-**Writes to Shard:** `CommunityID`, `PageRank` (all shards); new core shards (summaries)
+**Writes to Shard:** `CommunityID`, `PageRank` (all shards); new `community` category shards (`comm-summary-{cid}`) — NOT core
 
 ---
 
@@ -311,7 +315,8 @@ Timer tick (30 min)
 | `/api/graph` | GET | Full mesh visualization data |
 | `/api/search` | GET | Semantic search via embedder |
 | `/api/bonds` | POST/DELETE | Manual bond create/delete |
-| `/api/evict` | DELETE | Manual shard eviction |
+| `/api/evict` | DELETE | Manual shard eviction (blocked for `core` and `community` categories) |
+| `/api/janitor/run` | POST | Force Janitor cycle immediately — returns `{"evicted": N}` |
 | `/api/activity` | GET (SSE) | Real-time activity feed |
 | `/api/logs` | GET | Persistent activity log history |
 | `/api/community` | GET | Community summary text |
@@ -415,7 +420,7 @@ Every field on the `Shard` struct (`internal/storage/shard.go`), who writes it, 
 | Field | Type | Backends | Writers | Readers |
 |-------|------|----------|---------|---------|
 | `ID` | `string` | All 3 | SaveShard (all); MCP save_memory; gen_vec, repair_vec | Search functions (all); GetEvictionCandidates (all); RRF ranking; Visual Ego; Janitor logging |
-| `Category` | `string` | All 3 | SaveShard (all); MCP save_memory; Synthesizer (saves summaries as "core") | GetEvictionCandidates — filters != 'core' (all); GetCoreShards — filters = 'core' (all); GetShardsByCommunity — filters != 'archived' (Neo4j); Visual Ego node coloring |
+| `Category` | `string` | All 3 | SaveShard (all); MCP save_memory; Synthesizer (saves summaries as `"community"`) | GetEvictionCandidates — filters `!= 'core'` AND `!= 'community'` (all); GetCoreShards — filters `= 'core'` (all); GetShardsByCommunity — filters `!= 'archived'` (Neo4j); Visual Ego node coloring (core=white, community=amber, archived=white dim, others=community palette) |
 | `Content` | `string` | All 3 | SaveShard (all); MCP save_memory; Synthesizer summary save | FindText — text search (all); MCP embedder — embeds if no vector; Salience scoring — LLM rates importance; Community summarization — builds prompt; Visual Ego |
 
 ### Vector & Embedding
@@ -652,7 +657,7 @@ Global state that coordinates between components. When debugging race conditions
 
 ```
 Client → MCP save_memory
-  ├── Validate category (reject "core" from external callers)
+  ├── Validate category (reject "core" and "community" from external callers — system-managed only)
   ├── Embedder.Embed(content) ← if no vector provided
   ├── Summarizer.Summarize(salience_prompt) → [0.1, 1.0]
   ├── Repository.SaveShard(shard)
@@ -683,18 +688,19 @@ Client → MCP search_[memory|text|graph|all]
 ### Eviction Path
 
 ```
-Janitor timer (15 min)
+Janitor timer (15 min) OR /api/janitor/run POST
   ├── GetCount() → check if over max (1000)
   ├── GetEvictionCandidates(overage)
-  │   ├── [Cypher] Filter: non-core + resonance < threshold
+  │   ├── [Cypher] Filter: non-core + non-community + resonance < threshold
   │   ├── [Go] For each candidate:
   │   │   └── SurvivalScoreV4(bondCount, pagerank, salience, retrievalHistory, lastUsed)
   │   │       ├── CalculateACTRActivation(history, 0.5)
   │   │       ├── SalToStability(salience) → base stability in days
   │   │       └── Exponential decay: numerator / e^(days / stability)
   │   └── Sort ascending → return lowest N
-  ├── ArchiveShard(id) × N
-  │   └── [Neo4j] DETACH DELETE / [SQLite] move to shards_archive
+  ├── evictShard(id) × N
+  │   ├── [if Archiver set] SaveArchivedShard(shard) → PostgreSQL White Dwarf
+  │   └── ArchiveShard(id) → [Neo4j] DETACH DELETE / [SQLite] move to shards_archive
   ├── Optimize() → VACUUM / index rebuild
   └── GlobalLogger("Evicted N shards") → Activity Ledger
 ```
@@ -720,7 +726,7 @@ Synthesizer timer (30 min)
           ├── GetShardsByCommunity(cid) → top 15 by PageRank
           ├── Summarizer.Summarize(prompt) → narrative
           ├── Embedder.Embed(summary) → vector
-          ├── SaveShard(comm-summary-{cid}) → core shard (never evicted)
+          ├── SaveShard(comm-summary-{cid}) → category="community" (immune to Janitor eviction)
           └── Sleep 2 sec (Gemini rate limit)
 ```
 
