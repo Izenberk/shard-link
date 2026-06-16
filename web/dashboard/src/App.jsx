@@ -225,9 +225,12 @@ export default function App() {
       <EntityInspector
         node={selectedNode}
         degree={selectedDegree}
+        links={data?.links ?? []}
+        nodes={data?.nodes ?? []}
         onClose={() => setSelectedNode(null)}
         onEvict={handleEvict}
         onRefreshMetrics={handleRefreshMetrics}
+        onSelectNode={handleSelectNode}
       />
 
       {/* Bottom Toolbar */}

@@ -1,9 +1,46 @@
 import { DetailField, HudButton } from './design-system'
 
-export default function EntityInspector({ node, degree, onClose, onEvict, onRefreshMetrics }) {
+function truncateID(id) {
+  if (!id) return ''
+  return id.length > 24 ? id.substring(0, 21) + '...' : id
+}
+
+function survivalDots(score) {
+  const filled = Math.round((score / 100) * 5)
+  return '●'.repeat(filled) + '○'.repeat(5 - filled)
+}
+
+function survivalDotColor(score) {
+  if (score >= 80) return '#00ff88'
+  if (score >= 50) return '#5ef3ff'
+  if (score >= 20) return '#ffaa00'
+  return '#ff4444'
+}
+
+export default function EntityInspector({ node, degree, links, nodes, onClose, onEvict, onRefreshMetrics, onSelectNode }) {
   if (!node) return null
 
   const isEvictable = node.category !== 'core' && node.category !== 'archived'
+
+  const resonantLinks = links
+    ? links
+        .filter(l => {
+          const src = l.source.id || l.source
+          const tgt = l.target.id || l.target
+          return src === node.id || tgt === node.id
+        })
+        .sort((a, b) => (b.weight || 0) - (a.weight || 0))
+        .filter((l, _, arr) => {
+          const src = l.source.id || l.source
+          const tgt = l.target.id || l.target
+          const peerId = src === node.id ? tgt : src
+          return arr.findIndex(x => {
+            const xSrc = x.source.id || x.source
+            const xTgt = x.target.id || x.target
+            return (xSrc === node.id ? xTgt : xSrc) === peerId
+          }) === arr.indexOf(l)
+        })
+    : []
 
   return (
     <div className={`entity-inspector ${node ? 'active' : ''}`}>
@@ -98,6 +135,58 @@ export default function EntityInspector({ node, degree, onClose, onEvict, onRefr
         >
           <div className="content-box">{node.content || 'NO_CONTENT'}</div>
         </DetailField>
+
+        {/* RESONANT_BONDS */}
+        <div className="resonant-bonds-section">
+          <div className="resonant-bonds-header">
+            <span
+              className="detail-label"
+              title="Associative bonds — other shards that resonated above the similarity threshold. Sorted by bond strength. Peer survival indicates whether the connected memory is thriving or fading."
+            >
+              RESONANT_BONDS
+            </span>
+            <span className="resonant-bonds-count">{resonantLinks.length}</span>
+          </div>
+          <div className="resonant-bonds-list">
+            {resonantLinks.length === 0 ? (
+              <div className="bond-empty">NO_RESONANCE_DETECTED</div>
+            ) : (
+              resonantLinks.map((l, i) => {
+                const src = l.source.id || l.source
+                const tgt = l.target.id || l.target
+                const peerId = src === node.id ? tgt : src
+                const peerNode = nodes ? nodes.find(n => n.id === peerId) : null
+                const peerSurvival = peerNode ? (peerNode.survival || 0) : 0
+                const peerCategory = peerNode ? (peerNode.category || '') : ''
+                const weight = (l.weight || 0).toFixed(2)
+                const displaySurvival = peerCategory === 'core' ? 100 : peerSurvival
+                const dots = survivalDots(displaySurvival)
+                const dotColor = survivalDotColor(displaySurvival)
+
+                return (
+                  <div
+                    key={`${peerId}-${i}`}
+                    className={`bond-item${peerCategory ? ` bond-peer-${peerCategory}` : ''}`}
+                    onClick={() => { if (peerNode && onSelectNode) onSelectNode(peerNode) }}
+                  >
+                    <span className="bond-arrow">→</span>
+                    <span className="bond-peer-id" title={peerId}>{truncateID(peerId)}</span>
+                    <span className="bond-meta">
+                      <span className="bond-weight">{weight}</span>
+                      <span
+                        className="bond-dots"
+                        style={{ color: dotColor }}
+                        title={`Peer survival: ${displaySurvival.toFixed(0)}`}
+                      >
+                        {dots}
+                      </span>
+                    </span>
+                  </div>
+                )
+              })
+            )}
+          </div>
+        </div>
       </div>
     </div>
   )

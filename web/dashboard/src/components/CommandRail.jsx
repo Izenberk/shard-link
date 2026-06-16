@@ -14,6 +14,7 @@ const GLOSSARY = [
   { label: 'IDENTITY_ANCHOR', text: 'Immutable "Core" shards — survival locked at 100, immune to Janitor eviction. Represent foundational user identity.\n\nNon-core shards with cosine similarity ≥ 0.70 to any core shard receive resonance protection from eviction.' },
   { label: 'THE_JANITOR', text: 'Background eviction process. Scans for shards below the resonance threshold (default: 0.70) and with low survival scores.\n\nProtected from eviction:\n• Core shards (always).\n• Shards resonant to core (cosine ≥ 0.70).\n• Shards above survival threshold.' },
   { label: 'THE_SYNTHESIZER', text: 'Background linker that autonomously bonds resonant shards. Runs every ~10 minutes:\n\n1. Computes cosine similarity between shard embeddings.\n2. Creates CONNECTED_TO bonds above MESH_SENSITIVITY.\n3. Runs Louvain community detection.\n4. Runs PageRank for centrality scoring.\n5. Generates LLM summaries for large communities.' },
+  { label: 'RESONANT_BONDS', text: 'Associative connections formed when two shards exceed the cosine similarity threshold.\n\n• Weight: Cosine similarity (0.00–1.00). Higher = stronger resonance.\n• Dots (●●●○○): Peer survival score. Fewer filled dots = peer is fading toward eviction.\n• Click any bond to follow the association to the connected shard.' },
 ]
 
 const HEALTH_BUCKETS = [
