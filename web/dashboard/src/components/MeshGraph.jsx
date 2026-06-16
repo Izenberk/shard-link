@@ -4,7 +4,7 @@ import { scaleOrdinal } from 'd3-scale'
 import { zoom as d3Zoom, zoomIdentity } from 'd3-zoom'
 import {
   forceSimulation, forceLink, forceManyBody,
-  forceCenter, forceCollide, forceX, forceY,
+  forceCenter, forceCollide, forceX, forceY, forceRadial,
 } from 'd3-force'
 import { drag as d3Drag } from 'd3-drag'
 import 'd3-transition' // side-effect: enables .transition() on selections
@@ -118,7 +118,10 @@ export default function MeshGraph({
     function forceCluster(alpha) {
       const nodes = simulationRef.current?.nodes() || []
       const centroids = {}
+      // All non-core nodes contribute to their community centroid — community
+      // digest nodes anchor the centroid near their radial ring position.
       nodes.forEach(n => {
+        if (n.category === 'core') return
         if (!centroids[n.community]) centroids[n.community] = { x: 0, y: 0, count: 0 }
         centroids[n.community].x += n.x
         centroids[n.community].y += n.y
@@ -128,11 +131,13 @@ export default function MeshGraph({
         centroids[c].x /= centroids[c].count
         centroids[c].y /= centroids[c].count
       }
+      // Apply only to outer-ring shards — core and community have their own positional forces
       nodes.forEach(n => {
+        if (n.category === 'core' || n.category === 'community' || n.category === 'archived') return
         const c = centroids[n.community]
         if (c) {
-          n.vx += (c.x - n.x) * alpha * 0.06
-          n.vy += (c.y - n.y) * alpha * 0.06
+          n.vx += (c.x - n.x) * alpha * 0.08
+          n.vy += (c.y - n.y) * alpha * 0.08
         }
       })
     }
@@ -168,8 +173,13 @@ export default function MeshGraph({
         .distance(d => {
           const w = d.weight || 0.5
           const involvesCore = d.source.category === 'core' || d.target.category === 'core'
-          // Core bonds push the first ring far out — non-core bonds keep clusters tighter
-          return involvesCore ? 340 - (w * 60) : 180 - (w * 50)
+          const involvesCommunity = d.source.category === 'community' || d.target.category === 'community'
+          // Core bonds span from center to the community ring
+          if (involvesCore) return 300 - (w * 50)
+          // Community digest → member shard: keep members orbiting close to their digest planet
+          if (involvesCommunity) return 160 - (w * 35)
+          // Outer-ring shard → shard: tighter clusters
+          return 120 - (w * 25)
         })
         .strength(0.08))
       .force('charge', forceManyBody()
@@ -189,6 +199,10 @@ export default function MeshGraph({
       }))
       .force('cluster', forceCluster)
       .force('archival', forceArchival)
+      // Community digests orbit a fixed ring — forceRadial keeps them at radius 280 from center
+      .force('radial-community', forceRadial(280, width / 2, height / 2).strength(d =>
+        d.category === 'community' ? 0.45 : 0
+      ))
       .force('x', forceX(width / 2).strength(d => {
         if (d.category === 'core') return 0.65
         if (d.category === 'community') return 0  // floats freely — positioned by bonds to its cluster
@@ -236,6 +250,9 @@ export default function MeshGraph({
       const h = window.innerHeight
       svg.attr('width', w).attr('height', h)
       simulation.force('center', forceCenter(w / 2, h / 2).strength(0.02))
+      simulation.force('radial-community', forceRadial(280, w / 2, h / 2).strength(d =>
+        d.category === 'community' ? 0.45 : 0
+      ))
       simulation.force('x', forceX(w / 2).strength(d => {
         if (d.category === 'core') return 0.65
         if (d.category === 'community') return 0
@@ -397,12 +414,25 @@ export default function MeshGraph({
     // visible "big bang" explosion from the top-left corner on page load.
     const cx = window.innerWidth / 2
     const cy = window.innerHeight / 2
-    data.nodes.forEach((n, i) => {
-      if (n.x == null) {
-        const angle = (2 * Math.PI * i) / data.nodes.length
-        n.x = cx + 220 * Math.cos(angle)
-        n.y = cy + 220 * Math.sin(angle)
-      }
+    // Pre-position nodes in their orbital band to avoid big-bang explosion.
+    // Counts per layer so angle steps are evenly distributed within each band.
+    const coreNodes = data.nodes.filter(n => n.x == null && n.category === 'core')
+    const communityNodes = data.nodes.filter(n => n.x == null && n.category === 'community')
+    const outerNodes = data.nodes.filter(n => n.x == null && n.category !== 'core' && n.category !== 'community')
+    coreNodes.forEach((n, i) => {
+      const angle = (2 * Math.PI * i) / Math.max(coreNodes.length, 1)
+      n.x = cx + 60 * Math.cos(angle)
+      n.y = cy + 60 * Math.sin(angle)
+    })
+    communityNodes.forEach((n, i) => {
+      const angle = (2 * Math.PI * i) / Math.max(communityNodes.length, 1)
+      n.x = cx + 280 * Math.cos(angle)
+      n.y = cy + 280 * Math.sin(angle)
+    })
+    outerNodes.forEach((n, i) => {
+      const angle = (2 * Math.PI * i) / Math.max(outerNodes.length, 1)
+      n.x = cx + 460 * Math.cos(angle)
+      n.y = cy + 460 * Math.sin(angle)
     })
 
     simulation.nodes(data.nodes)
