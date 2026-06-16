@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/izenberk/shard-link/internal/janitor"
 	"github.com/izenberk/shard-link/internal/metrics"
 	"github.com/izenberk/shard-link/internal/storage"
 	"github.com/joho/godotenv"
@@ -73,6 +74,7 @@ type Server struct {
 	localVessel    *storage.Vessel
 	archivalVessel *storage.PostgresVessel
 	embedder       storage.Embedder
+	janitor        *janitor.Janitor
 	bootTime       time.Time
 }
 
@@ -141,11 +143,24 @@ func main() {
 		log.Printf("Warning: Failed to init embedder: %v. Search will be limited.", err)
 	}
 
+	maxSize := 1000
+	if ms := os.Getenv("MAX_SHARDS"); ms != "" {
+		if n, err := strconv.Atoi(ms); err == nil && n > 0 {
+			maxSize = n
+		}
+	}
+	var archiver janitor.Archiver
+	if av != nil {
+		archiver = av
+	}
+	j := janitor.NewJanitor(v, archiver, 24*time.Hour, maxSize, storage.GlobalLogger)
+
 	srv := &Server{
 		vessel:         v,
 		localVessel:    lv,
 		archivalVessel: av,
 		embedder:       emb,
+		janitor:        j,
 		bootTime:       bootTime,
 	}
 
@@ -183,6 +198,7 @@ func main() {
 	http.HandleFunc("/api/logs", srv.handleGetLogs)
 	http.HandleFunc("/api/evict", srv.handleEvict)
 	http.HandleFunc("/api/community", srv.handleGetCommunity)
+	http.HandleFunc("/api/janitor/run", srv.handleJanitorRun)
 	http.HandleFunc("/api/prune-summaries", srv.handlePruneSummaries)
 	http.HandleFunc("/api/health", srv.handleHealthDistribution)
 	http.HandleFunc("/metrics", srv.handleMetrics)
@@ -247,6 +263,26 @@ func (s *Server) handleEvict(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleJanitorRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.janitor == nil {
+		http.Error(w, "Janitor not initialized", http.StatusInternalServerError)
+		return
+	}
+
+	evicted, err := s.janitor.RunForced(r.Context(), 0)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]int{"evicted": evicted})
 }
 
 func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {

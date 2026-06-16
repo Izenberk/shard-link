@@ -6,7 +6,7 @@ import CommandBar from './components/CommandBar'
 import ActivityFeed from './components/ActivityFeed'
 import useGraphData from './hooks/useGraphData'
 import useActivityStream from './hooks/useActivityStream'
-import { searchGraph, evictShard, createBond, deleteBond, fetchCommunity, fetchGraph } from './lib/api'
+import { searchGraph, evictShard, createBond, deleteBond, fetchCommunity, fetchGraph, runJanitor } from './lib/api'
 
 export default function App() {
   const [selectedNode, setSelectedNode] = useState(null)
@@ -146,6 +146,12 @@ export default function App() {
     }
   }, [communityFilter, isolateCommunity, restoreFullData])
 
+  const handleRunJanitor = useCallback(async () => {
+    const result = await runJanitor()
+    setTimeout(() => { refetch(); refetchHealth() }, 800)
+    return result
+  }, [refetch, refetchHealth])
+
   const handleClickShard = useCallback((shardId) => {
     if (!data) return
     const node = data.nodes.find(n => n.id === shardId)
@@ -238,6 +244,7 @@ export default function App() {
         bondMode={bondMode}
         onToggleBondMode={() => { setBondMode(prev => !prev); setSelectedNode(null); }}
         zoomControls={zoomControls}
+        onRunJanitor={handleRunJanitor}
       />
 
       {/* Activity Feed */}

@@ -15,7 +15,7 @@ func TestJanitor_EvictionImmunity(t *testing.T) {
 	ctx := context.Background()
 
 	// 2. Setup Janitor (max 3 shards)
-	jan := NewJanitor(v, 1*time.Second, 3, nil)
+	jan := NewJanitor(v, nil, 1*time.Second, 3, nil)
 	t.Log("Initialized Janitor with limit: 3 shards")
 
 	// 3. Insert Test Data

@@ -57,3 +57,12 @@ export async function fetchLogs() {
   if (!resp.ok) throw new Error(`Logs fetch failed: ${resp.status}`)
   return resp.json()
 }
+
+export async function runJanitor() {
+  const resp = await fetch(`${BASE}/api/janitor/run`, { method: 'POST' })
+  if (!resp.ok) {
+    const text = await resp.text()
+    throw new Error(`Janitor run failed: ${text}`)
+  }
+  return resp.json()
+}

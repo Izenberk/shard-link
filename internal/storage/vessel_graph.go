@@ -266,7 +266,7 @@ func (v *VesselGraph) GetEvictionCandidates(ctx context.Context, limit int) ([]s
 	MATCH (s:Shard) WHERE s.category <> 'core'
 	WITH s, core, gds.similarity.cosine(s.embedding, core.embedding) as sim
 	WITH s, max(sim) as maxResonance
-	WHERE maxResonance < parseFloat($threshold)
+	WHERE maxResonance < toFloat($threshold)
 	OPTIONAL MATCH (s)-[r:CONNECTED_TO]-()
 	RETURN s, count(r) as degree
 	`
