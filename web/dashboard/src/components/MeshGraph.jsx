@@ -435,14 +435,24 @@ export default function MeshGraph({
       n.y = cy + 460 * Math.sin(angle)
     })
 
+    const isFirstLoad = !initialZoomApplied.current
+
     simulation.nodes(data.nodes)
     simulation.force('link').links(data.links)
 
+    // First load: silently pre-settle the layout before the first paint.
+    // simulation.tick(N) advances physics N steps without firing the 'tick' event,
+    // so no DOM updates happen — browser sees nothing until the RAF loop starts.
+    // Nodes start in their orbital bands (pre-positioned above), so 200 ticks is
+    // enough to reach near-stability without visible drift.
+    if (isFirstLoad) {
+      simulation.alpha(1).tick(200)
+    }
+
     // Apply initial zoom once on first data load, scaled to node count
-    if (!initialZoomApplied.current && svgRef.current && containerRef.current) {
+    if (isFirstLoad && svgRef.current && containerRef.current) {
       initialZoomApplied.current = true
       const n = data.nodes.length
-      // Scale shrinks as mesh grows: 0.55 at ~50 nodes, 0.4 at ~100, 0.25 at ~500+
       const scale = Math.max(0.2, Math.min(0.7, 4.5 / Math.sqrt(n)))
       const w = window.innerWidth
       const h = window.innerHeight
@@ -455,7 +465,9 @@ export default function MeshGraph({
     }
 
     if (changeType === 'structure' || !changeType) {
-      simulation.alpha(0.5).restart()
+      // First load: restart with tiny alpha — nodes are already settled, just micro-adjust
+      // Structure change: animate from current positions (new shards fly into place)
+      simulation.alpha(isFirstLoad ? 0.05 : 0.4).restart()
     } else {
       simulation.alpha(0.01).restart()
     }
