@@ -125,8 +125,19 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 
-	// 3.1 Summon the Janitor
-	jan := janitor.NewJanitor(v, 15*time.Minute, 1000, storage.GlobalLogger)
+	// 3.1 White Dwarf archival vessel (Postgres) — init before Janitor so evictions archive first
+	graphV, _ := v.(*storage.VesselGraph)
+	var av *storage.PostgresVessel
+	if connStr := os.Getenv("DATABASE_URL"); connStr != "" {
+		av, _ = storage.NewPostgresVessel(ctx, connStr)
+	}
+	var archiver janitor.Archiver
+	if av != nil {
+		archiver = av
+	}
+
+	// 3.2 Summon the Janitor
+	jan := janitor.NewJanitor(v, archiver, 15*time.Minute, 1000, storage.GlobalLogger)
 
 	wg.Add(1)
 	go func() {
@@ -135,11 +146,6 @@ func main() {
 	}()
 
 	// 4. Summon the HygieneWorker (Storage Maintenance)
-	graphV, _ := v.(*storage.VesselGraph)
-	var av *storage.PostgresVessel
-	if connStr := os.Getenv("DATABASE_URL"); connStr != "" {
-		av, _ = storage.NewPostgresVessel(ctx, connStr)
-	}
 
 	hygieneInterval := 24 * time.Hour
 	if h := os.Getenv("HYGIENE_INTERVAL_HOURS"); h != "" {
