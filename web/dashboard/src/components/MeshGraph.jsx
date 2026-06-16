@@ -62,6 +62,8 @@ export default function MeshGraph({
   const degreeRef = useRef({})
   const adjMapRef = useRef(new Map())
   const bondSourceRef = useRef(null)
+  const initialZoomApplied = useRef(false)
+  const initialTransformRef = useRef(zoomIdentity)
 
   // Build adjacency map
   const buildAdjacencyMap = useCallback((links) => {
@@ -153,23 +155,42 @@ export default function MeshGraph({
     }
 
     const simulation = forceSimulation()
-      .force('link', forceLink().id(d => d.id).distance(180).strength(0.3))
-      .force('charge', forceManyBody().strength(d => d.category === 'archived' ? 0 : -1600))
-      .force('center', forceCenter(width / 2, height / 2))
+      .force('link', forceLink()
+        .id(d => d.id)
+        .distance(d => {
+          const w = d.weight || 0.5
+          return 220 - (w * 80) // range: ~140 (strong bond) to ~220 (weak bond)
+        })
+        .strength(0.4))
+      .force('charge', forceManyBody()
+        .strength(d => {
+          if (d.category === 'archived') return 0
+          const bonds = degreeRef.current[d.id] || 0
+          if (bonds === 0) return -300
+          if (bonds <= 2) return -800
+          return -1400
+        }))
+      .force('center', forceCenter(width / 2, height / 2).strength(0.08))
       .force('collision', forceCollide().radius(d => {
         if (d.category === 'archived') return 10
-        return (degreeRef.current[d.id] || 0) * 2 + 45
+        return (degreeRef.current[d.id] || 0) * 2 + 38
       }))
       .force('cluster', forceCluster)
       .force('archival', forceArchival)
       .force('x', forceX(width / 2).strength(d => {
         if (d.category === 'core') return 0.6
         if (d.category === 'archived') return 0
+        const bonds = degreeRef.current[d.id] || 0
+        if (bonds === 0) return 0.15
+        if (bonds <= 2) return 0.06
         return 0.03
       }))
       .force('y', forceY(height / 2).strength(d => {
         if (d.category === 'core') return 0.6
         if (d.category === 'archived') return 0
+        const bonds = degreeRef.current[d.id] || 0
+        if (bonds === 0) return 0.15
+        if (bonds <= 2) return 0.06
         return 0.03
       }))
 
@@ -189,9 +210,23 @@ export default function MeshGraph({
       const w = window.innerWidth
       const h = window.innerHeight
       svg.attr('width', w).attr('height', h)
-      simulation.force('center', forceCenter(w / 2, h / 2))
-      simulation.force('x', forceX(w / 2).strength(d => d.category === 'core' ? 0.6 : 0.03))
-      simulation.force('y', forceY(h / 2).strength(d => d.category === 'core' ? 0.6 : 0.03))
+      simulation.force('center', forceCenter(w / 2, h / 2).strength(0.08))
+      simulation.force('x', forceX(w / 2).strength(d => {
+        if (d.category === 'core') return 0.6
+        if (d.category === 'archived') return 0
+        const bonds = degreeRef.current[d.id] || 0
+        if (bonds === 0) return 0.15
+        if (bonds <= 2) return 0.06
+        return 0.03
+      }))
+      simulation.force('y', forceY(h / 2).strength(d => {
+        if (d.category === 'core') return 0.6
+        if (d.category === 'archived') return 0
+        const bonds = degreeRef.current[d.id] || 0
+        if (bonds === 0) return 0.15
+        if (bonds <= 2) return 0.06
+        return 0.03
+      }))
       simulation.alpha(0.3).restart()
     }
     window.addEventListener('resize', handleResize)
@@ -333,6 +368,22 @@ export default function MeshGraph({
     simulation.nodes(data.nodes)
     simulation.force('link').links(data.links)
 
+    // Apply initial zoom once on first data load, scaled to node count
+    if (!initialZoomApplied.current && svgRef.current && containerRef.current) {
+      initialZoomApplied.current = true
+      const n = data.nodes.length
+      // Scale shrinks as mesh grows: 0.55 at ~50 nodes, 0.4 at ~100, 0.25 at ~500+
+      const scale = Math.max(0.2, Math.min(0.7, 4.5 / Math.sqrt(n)))
+      const w = window.innerWidth
+      const h = window.innerHeight
+      const tx = (w / 2) * (1 - scale)
+      const ty = (h / 2) * (1 - scale)
+      const t = zoomIdentity.translate(tx, ty).scale(scale)
+      initialTransformRef.current = t
+      containerRef.current.attr('transform', t.toString())
+      select(svgRef.current).property('__zoom', t)
+    }
+
     if (changeType === 'structure' || !changeType) {
       simulation.alpha(0.5).restart()
     } else {
@@ -416,7 +467,7 @@ export default function MeshGraph({
   }, [])
 
   const resetView = useCallback(() => {
-    select(svgRef.current).transition().duration(750).call(zoomRef.current.transform, zoomIdentity)
+    select(svgRef.current).transition().duration(750).call(zoomRef.current.transform, initialTransformRef.current)
   }, [])
 
   // Expose zoom controls to parent via callback
