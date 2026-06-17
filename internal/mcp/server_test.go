@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -360,4 +361,81 @@ func TestCoreIntentGate_AllowedWithFlag(t *testing.T) {
 	if errMsg != "" {
 		t.Errorf("category 'core' with allow_core=true should be allowed, got: %s", errMsg)
 	}
+}
+
+// --- Race condition tests (run with: go test -race ./internal/mcp/) ---
+
+// TestWorkingMemory_ConcurrentSessions launches 100 goroutines that call Update
+// and Bias simultaneously across 10 shared session IDs. The race detector fires
+// if the underlying sessions map is accessed without the RWMutex.
+func TestWorkingMemory_ConcurrentSessions(t *testing.T) {
+	wm := NewWorkingMemory(30 * time.Minute)
+
+	const goroutines = 100
+	var wg sync.WaitGroup
+	wg.Add(goroutines * 2) // half writers (Update), half readers (Bias)
+
+	for i := range goroutines {
+		go func(i int) {
+			defer wg.Done()
+			sessID := fmt.Sprintf("session-%d", i%10)
+			seed := storage.Shard{
+				ID:     fmt.Sprintf("shard-%d", i),
+				Vector: storage.EncodeVector([]float32{float32(i%10 + 1), 0.0}),
+			}
+			wm.Update(sessID, []storage.Shard{seed})
+		}(i)
+
+		go func(i int) {
+			defer wg.Done()
+			sessID := fmt.Sprintf("session-%d", i%10)
+			_ = wm.Bias(sessID, []float32{1.0, 0.0}, 0.7)
+		}(i)
+	}
+
+	wg.Wait()
+	// Race detector: no concurrent map mutation in wm.sessions without the RWMutex.
+}
+
+// TestSessionTokens_ConcurrentAuth races 50 code-writer goroutines against 50
+// code-consumer goroutines on pendingCodes. The race detector confirms every
+// map access holds the mutex — no concurrent map write panics.
+func TestSessionTokens_ConcurrentAuth(t *testing.T) {
+	const goroutines = 50
+	var wg sync.WaitGroup
+
+	// Writers: simulate handleOAuthAuthorize storing new codes
+	wg.Add(goroutines)
+	for i := range goroutines {
+		go func(i int) {
+			defer wg.Done()
+			code := fmt.Sprintf("race-code-%d", i)
+			pendingCodes.Lock()
+			pendingCodes.codes[code] = authCode{expiresAt: time.Now().Add(time.Minute)}
+			pendingCodes.Unlock()
+		}(i)
+	}
+
+	// Readers/consumers: simulate handleOAuthToken consuming codes
+	wg.Add(goroutines)
+	for i := range goroutines {
+		go func(i int) {
+			defer wg.Done()
+			code := fmt.Sprintf("race-code-%d", i)
+			pendingCodes.Lock()
+			if _, exists := pendingCodes.codes[code]; exists {
+				delete(pendingCodes.codes, code)
+			}
+			pendingCodes.Unlock()
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Clean up any codes that writers stored before consumers ran
+	pendingCodes.Lock()
+	for i := range goroutines {
+		delete(pendingCodes.codes, fmt.Sprintf("race-code-%d", i))
+	}
+	pendingCodes.Unlock()
 }

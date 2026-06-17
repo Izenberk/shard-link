@@ -38,22 +38,29 @@ func NewWorkingMemory(ttl time.Duration) *WorkingMemory {
 // Formula: biased = λ·query + (1-λ)·centroid
 // Returns the original query unchanged if no centroid exists yet (first query).
 func (wm *WorkingMemory) Bias(sessionID string, queryVec []float32, lambda float64) []float32 {
+	// Copy the centroid under the read lock — sc.Vector is mutated by Update
+	// without holding the lock after the pointer is obtained from the map.
 	wm.mu.RLock()
 	sc, exists := wm.sessions[sessionID]
+	var centroid []float32
+	if exists && sc.Vector != nil {
+		centroid = make([]float32, len(sc.Vector))
+		copy(centroid, sc.Vector)
+	}
 	wm.mu.RUnlock()
 
-	if !exists || sc.Vector == nil {
+	if centroid == nil {
 		return queryVec
 	}
 
 	// Guard: dimension mismatch — return unbiased rather than panic
-	if len(queryVec) != len(sc.Vector) {
+	if len(queryVec) != len(centroid) {
 		return queryVec
 	}
 
 	biased := make([]float32, len(queryVec))
 	for i := range queryVec {
-		biased[i] = float32(lambda)*queryVec[i] + float32(1.0-lambda)*sc.Vector[i]
+		biased[i] = float32(lambda)*queryVec[i] + float32(1.0-lambda)*centroid[i]
 	}
 
 	return biased
