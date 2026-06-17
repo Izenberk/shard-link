@@ -146,3 +146,66 @@ func BenchmarkRRF(b *testing.B) {
 		_ = ReciprocalRankFusion(10, 60.0, list1, list2, list3)
 	}
 }
+
+// BenchmarkSearchPipeline_Sub5ms measures the end-to-end compute cost of a
+// search_all request with pre-fetched results from all three engines.
+// Pipeline: encode query → dedup 3×10 results → RRF merge → MMR re-rank (top 10).
+//
+// SLA: full search_all < 5ms (includes SQL round-trips). Pure compute must stay well
+// under 1ms to leave headroom. Run benchstat against this baseline before any change
+// to the search, RRF, or MMR code paths.
+//
+// NOTE: BenchmarkMMR currently measures ~550µs for 20 candidates at 768-D. The 50µs
+// contract in TEST_STRATEGY.md is aspirational — MMR is O(k×n) decode + cosine calls.
+// Track the delta, not the absolute value.
+//
+// Run: go test -bench=BenchmarkSearchPipeline -benchmem -count=5 ./internal/storage/
+func BenchmarkSearchPipeline_Sub5ms(b *testing.B) {
+	const dim = 768
+
+	// Pre-encode query vector (simulates embedder output)
+	queryVec := make([]float32, dim)
+	queryVec[0] = 1.0
+	queryBytes := EncodeVector(queryVec)
+
+	// Build 3 engine result lists: 10 shards each, 5 IDs overlap between text and graph.
+	// Total unique: 25. This matches a typical search_all with limit=10 per engine.
+	textResults := make([]Shard, 10)
+	vectorResults := make([]Shard, 10)
+	graphResults := make([]Shard, 10)
+	for i := range 10 {
+		v := make([]float32, dim)
+		v[i%dim] = 1.0
+		enc := EncodeVector(v)
+		textResults[i] = Shard{ID: "t" + string(rune('a'+i)), Vector: enc}
+		vectorResults[i] = Shard{ID: "v" + string(rune('a'+i)), Vector: enc}
+		if i < 5 {
+			graphResults[i] = Shard{ID: "t" + string(rune('a'+i)), Vector: enc} // overlaps text
+		} else {
+			graphResults[i] = Shard{ID: "g" + string(rune('a'+i-5)), Vector: enc}
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Stage 1: map dedup — models handleSearchAll fan-out merge
+		seen := make(map[string]Shard, 25)
+		for _, sh := range textResults {
+			seen[sh.ID] = sh
+		}
+		for _, sh := range vectorResults {
+			seen[sh.ID] = sh
+		}
+		for _, sh := range graphResults {
+			seen[sh.ID] = sh
+		}
+
+		// Stage 2: RRF across the three engine lists (FindHybrid / future search_all path)
+		merged := ReciprocalRankFusion(20, 60.0, textResults, vectorResults, graphResults)
+
+		// Stage 3: MMR re-rank top 10 from merged results
+		_ = MaximalMarginalRelevance(queryBytes, merged, 10, 0.7)
+
+		_ = len(seen) // prevent dead-code elimination of the dedup stage
+	}
+}
