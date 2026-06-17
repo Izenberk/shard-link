@@ -9,10 +9,10 @@
 
 | Layer | What It Proves | Infra Required | Status |
 |---|---|---|---|
-| 1 — Unit | Pure functions produce correct output | None | In progress |
-| 2 — Integration | Components wire together correctly | SQLite `:memory:` | Planned |
-| 3 — Race | No data races under concurrency | None (`-race` flag) | Planned |
-| 4 — Benchmark | Performance contracts hold after changes | None (`benchstat`) | Partial ✓ |
+| 1 — Unit | Pure functions produce correct output | None | ✓ Complete |
+| 2 — Integration | Components wire together correctly | SQLite `:memory:` | ✓ Complete |
+| 3 — Race | No data races under concurrency | None (`-race` flag) | ✓ Complete |
+| 4 — Benchmark | Performance contracts hold after changes | None (`benchstat`) | ✓ Complete |
 | 5 — E2E | Full stack boots and MCP tools respond | Docker Compose + Neo4j | Deferred |
 
 ---
@@ -281,6 +281,15 @@ go test -bench=. -race ./...
 - Scripted inputs (`save "test content"` → `search "test content"`) are synthetically simple compared to real session traffic.
 - Layers 1–4 catch the same bug classes at lower cost and faster feedback.
 - No CI pipeline exists yet — E2E scripts have no automated runner.
+
+### Recommended Path Forward (decided 2026-06-17)
+
+**Do not write raw E2E test scripts.** Build `shard-cli` instead — it covers all four planned scenarios as a daily-use tool, not a test-only artifact. A CLI command that gets used every day is a better harness than a script that runs once during setup. GitHub Actions CI is the second priority: it makes Layers 1–4 run automatically on every push so enforcement doesn't rely on manual discipline.
+
+Priority order:
+1. `shard-cli` (Cobra + Viper, hits live MCP server) — natural E2E harness with real utility
+2. GitHub Actions CI — automated enforcement for Layers 1–4
+3. Dedicated E2E scripts — only if a bug slips through that `shard-cli` usage wouldn't catch
 
 ### Trigger Conditions — When to Revisit
 

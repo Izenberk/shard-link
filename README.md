@@ -108,5 +108,25 @@ The Synthesizer generates macro-level context for shard clusters using LLM summa
 
 **Fault isolation:** Summarization runs in a detached goroutine with a separate 5-minute timeout. Gemini API failures are logged and skipped — the MCP server is never affected. Rate limiting (2s between calls) respects the Gemini free tier (15 RPM).
 
+## 10. Testing
+
+Shard-Link uses a five-layer test pyramid. Layers 1–4 are complete and require no external infrastructure.
+
+| Layer | What It Proves | Status |
+|-------|---------------|--------|
+| 1 — Unit | Pure functions produce correct output | ✓ Complete |
+| 2 — Integration | Components wire together via SQLite `:memory:` | ✓ Complete |
+| 3 — Race | No data races under concurrency (`-race` flag) | ✓ Complete |
+| 4 — Benchmark | Performance contracts hold after changes | ✓ Complete |
+| 5 — E2E | Full stack boots and all MCP tools respond end-to-end | Deferred |
+
+```bash
+go test ./...           # all unit + integration tests
+go test -race ./...     # + race detector
+go test -bench=. -benchmem -count=5 ./internal/storage/   # benchmarks
+```
+
+**Layer 5** is intentionally deferred. Real production traffic is a stronger harness than synthetic save/search scripts. The planned path is `shard-cli` (Cobra + Viper CLI hitting the live MCP server) — it covers all E2E scenarios as a daily-use tool, not a test-only artifact. GitHub Actions CI is the second priority.
+
 ---
 *Status: PHASE 7 COMPLETE (World-Class Engine) | Visual Ego: React 19 + Vite 6 (Neural Observatory) | Formula: v4.2 | 13 MCP Tools | Transport: Streamable HTTP (MCP 2024-11-05) | Date: 2026-06-13*
