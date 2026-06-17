@@ -22,13 +22,19 @@ type MockRepository struct {
 	GraphBonds    []storage.ShardBond
 
 	// Call tracking
-	ReinforceCalls [][]string // each call's ID list
-	FindTextCalls  int
-	FindResCalls   int
-	SearchGrCalls  int
+	ReinforceCalls  [][]string // each call's ID list
+	FindTextCalls   int
+	FindResCalls    int
+	SearchGrCalls   int
+	SaveShardCalls  int
 }
 
-func (m *MockRepository) SaveShard(_ context.Context, _ storage.Shard) error   { return nil }
+func (m *MockRepository) SaveShard(_ context.Context, _ storage.Shard) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.SaveShardCalls++
+	return nil
+}
 func (m *MockRepository) GetAllShards(_ context.Context) ([]storage.Shard, error) {
 	return nil, nil
 }
@@ -63,6 +69,24 @@ func (m *MockRepository) PruneStaleSummaries(_ context.Context) (int, error) { r
 func (m *MockRepository) SyncBonds(_ context.Context, _ float64) (int, error) { return 0, nil }
 func (m *MockRepository) Optimize(_ context.Context) error                    { return nil }
 func (m *MockRepository) Close() error                                        { return nil }
+func (m *MockRepository) GetBondCount(_ context.Context) (int, error)         { return 0, nil }
+func (m *MockRepository) GetCommunityCount(_ context.Context) (int, error)    { return 0, nil }
+func (m *MockRepository) GetRecentShards(_ context.Context, _ int, _ string) ([]storage.ShardMetadata, error) {
+	return nil, nil
+}
+func (m *MockRepository) GetShardsByCategory(_ context.Context, _ string, _ int) ([]storage.ShardMetadata, error) {
+	return nil, nil
+}
+func (m *MockRepository) GetAtRiskShards(_ context.Context, _ int, _ float64) ([]storage.ShardMetadata, error) {
+	return nil, nil
+}
+func (m *MockRepository) UpdateShard(_ context.Context, _ string, _ storage.ShardUpdate) error {
+	return nil
+}
+func (m *MockRepository) DeleteShard(_ context.Context, _ string) error { return nil }
+func (m *MockRepository) GetSurvivalDistribution(_ context.Context) (map[string]int, error) {
+	return nil, nil
+}
 
 func (m *MockRepository) FindText(_ context.Context, _ string, _ int, _ bool) ([]storage.Shard, error) {
 	m.mu.Lock()

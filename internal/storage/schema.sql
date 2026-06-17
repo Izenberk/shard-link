@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS shards_archive (
     source_ref  TEXT,
     confidence  REAL DEFAULT 1.0,
 
+    last_used   DATETIME,
+    created_at  DATETIME,
     archived_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     use_count   INTEGER DEFAULT 1
 );

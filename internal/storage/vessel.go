@@ -391,8 +391,8 @@ func (v *Vessel) GetCoreShards(ctx context.Context) ([]Shard, error) {
 
 func (v *Vessel) ArchiveShard(ctx context.Context, id string) error {
 	const query = `
-		INSERT OR REPLACE INTO shards_archive (id, category, content, vector, metadata, source_type, source_ref, confidence)
-		SELECT id, category, content, vector, metadata, source_type, source_ref, confidence FROM shards WHERE id = ?;
+		INSERT OR REPLACE INTO shards_archive (id, category, content, vector, metadata, source_type, source_ref, confidence, last_used, created_at)
+		SELECT id, category, content, vector, metadata, source_type, source_ref, confidence, last_used, created_at FROM shards WHERE id = ?;
 	`
 	stmt, _, err := v.conn.Prepare(query)
 	if err != nil {
