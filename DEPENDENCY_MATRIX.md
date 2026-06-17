@@ -5,7 +5,7 @@
 >
 > Think of this as a P&ID diagram — every component is a node, every data flow is a pipe.
 >
-> **Last Updated:** 2026-06-17
+> **Last Updated:** 2026-06-17 (r2)
 
 ---
 
@@ -208,7 +208,8 @@ Each card lists: what the component does, what feeds into it (upstream), what it
 Timer tick (15 min) OR RunForced() API call
   → GetCount() — check if over limit
   → GetEvictionCandidates(overage)
-      → Cypher: filter non-core + non-community + resonance < threshold
+      → SQL/Cypher: filter non-core + non-community (all 3 backends)
+      → Go: resonance < threshold check (cosine < JANITOR_RESONANCE_THRESHOLD, SQLite only)
       → Go: SurvivalScoreV4(bondCount, pagerank, salience, retrievalHistory, lastUsed)
       → Sort ascending, return lowest N
   → evictShard(id) × N
@@ -691,7 +692,8 @@ Client → MCP search_[memory|text|graph|all]
 Janitor timer (15 min) OR /api/janitor/run POST
   ├── GetCount() → check if over max (1000)
   ├── GetEvictionCandidates(overage)
-  │   ├── [Cypher] Filter: non-core + non-community + resonance < threshold
+  │   ├── [SQL/Cypher] Filter: non-core + non-community (all 3 backends)
+  │   ├── [Go] Resonance check: cosine(shard, core) < threshold (SQLite path)
   │   ├── [Go] For each candidate:
   │   │   └── SurvivalScoreV4(bondCount, pagerank, salience, retrievalHistory, lastUsed)
   │   │       ├── CalculateACTRActivation(history, 0.5)

@@ -209,7 +209,8 @@ func (s *MCPServer) RegisterTools() {
 		mcp.WithDescription("Save a new contextual fragment to long-term memory"),
 		mcp.WithString("id", mcp.Description("Unique identifier"), mcp.Required()),
 		mcp.WithString("content", mcp.Description("The text to remember"), mcp.Required()),
-		mcp.WithString("category", mcp.Description("e.g. 'session', 'core', 'memory'"), mcp.Required()),
+		mcp.WithString("category", mcp.Description("e.g. 'session', 'memory'. Use 'core' only with allow_core=true"), mcp.Required()),
+		mcp.WithBoolean("allow_core", mcp.Description("Must be true to save category='core' shards — permanently immune to eviction")),
 		mcp.WithString("vector", mcp.Description("Base64 encoded float32 vector (optional)")),
 	)
 	s.mcp.AddTool(saveTool, s.handleSave)
@@ -1388,6 +1389,7 @@ func (s *MCPServer) updateCentroidSlice(ctx context.Context, shards []storage.Sh
 }
 
 // allowedCategories restricts which categories MCP callers can assign.
+// "core" is in the map but save_memory also requires allow_core=true (see handleSave 2.1a).
 var allowedCategories = map[string]bool{
 	"core":     true,
 	"memory":   true,
@@ -1413,13 +1415,18 @@ func (s *MCPServer) handleSave(ctx context.Context, request mcp.CallToolRequest)
 	id := request.GetString("id", "")
 	content := request.GetString("content", "")
 	category := request.GetString("category", "memory")
+	allowCore := request.GetBool("allow_core", false)
 	vecStr := request.GetString("vector", "")
 
-	slog.Info("save_memory called", "id", id, "content_len", len(content), "category", category)
+	slog.Info("save_memory called", "id", id, "content_len", len(content), "category", category, "allow_core", allowCore)
 
-	// 2.1 — Category whitelist: reject "core" from MCP callers
+	// 2.1 — Category whitelist
 	if !allowedCategories[category] {
-		return mcp.NewToolResultError(fmt.Sprintf("Category %q is not allowed via MCP. Allowed: core, memory, session, tech, arch, contract", category)), nil
+		return mcp.NewToolResultError(fmt.Sprintf("Category %q is not allowed via MCP. Allowed: core (requires allow_core=true), memory, session, tech, arch, contract", category)), nil
+	}
+	// 2.1a — Core intent gate: core shards are permanently eviction-immune — require explicit opt-in
+	if category == "core" && !allowCore {
+		return mcp.NewToolResultError("category 'core' requires allow_core=true — core shards are permanently immune to eviction and cannot be bulk-evicted"), nil
 	}
 
 	// 2.2 — Content size limits

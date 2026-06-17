@@ -95,9 +95,11 @@ func NewVessel(path string) (*Vessel, error) {
 
 // SaveShard persists a fragment or updates it if the ID already exists.
 func (v *Vessel) SaveShard(ctx context.Context, s Shard) error {
+	// COALESCE: use caller-supplied LastUsed when non-zero (enables deterministic tests
+	// and data migrations), otherwise fall back to CURRENT_TIMESTAMP.
 	const query = `
-		INSERT INTO shards (id, category, content, vector, metadata, source_type, source_ref, confidence)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO shards (id, category, content, vector, metadata, source_type, source_ref, confidence, last_used)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
 		ON CONFLICT(id) DO UPDATE SET
 			category=excluded.category,
 			content=excluded.content,
@@ -106,7 +108,7 @@ func (v *Vessel) SaveShard(ctx context.Context, s Shard) error {
 			source_type=excluded.source_type,
 			source_ref=excluded.source_ref,
 			confidence=excluded.confidence,
-			last_used=CURRENT_TIMESTAMP;
+			last_used=excluded.last_used;
 	`
 	stmt, _, err := v.conn.Prepare(query)
 	if err != nil {
@@ -122,6 +124,11 @@ func (v *Vessel) SaveShard(ctx context.Context, s Shard) error {
 	stmt.BindText(6, s.SourceType)
 	stmt.BindText(7, s.SourceRef)
 	stmt.BindFloat(8, s.Confidence)
+	if s.LastUsed.IsZero() {
+		stmt.BindNull(9)
+	} else {
+		stmt.BindTime(9, s.LastUsed, sqlite3.TimeFormat3)
+	}
 
 	if err := stmt.Exec(); err != nil {
 		return fmt.Errorf("exec save: %w", err)
@@ -443,8 +450,8 @@ func (v *Vessel) GetCount(ctx context.Context) (int, error) {
 	return 0, stmt.Err()
 }
 
-// GetEvictionCandidates identifies low-survival shards using the Survival Formula v4.1.
-// SQL handles hard exclusions (core protection, resonance filter).
+// GetEvictionCandidates identifies low-survival shards using the Survival Formula v4.2.
+// SQL handles hard exclusions (core + community protection, resonance filter).
 // Go handles ranking: compute SurvivalScoreV4 for each candidate, sort ascending, return lowest N.
 func (v *Vessel) GetEvictionCandidates(ctx context.Context, limit int) ([]string, error) {
 	thresholdStr := os.Getenv("JANITOR_RESONANCE_THRESHOLD")
@@ -456,14 +463,14 @@ func (v *Vessel) GetEvictionCandidates(ctx context.Context, limit int) ([]string
 		threshold = 0.70
 	}
 
-	// Fetch all non-core candidates with their bond counts and salience-relevant fields.
+	// Fetch all non-core, non-community candidates with their bond counts and salience-relevant fields.
 	// Resonance protection is applied in Go since SQLite's vec_distance_cosine is row-by-row anyway.
 	const query = `
 		SELECT s.id, s.category, s.content, s.last_used, s.confidence,
 		       (SELECT COUNT(*) FROM shard_bonds WHERE from_id = s.id OR to_id = s.id) as bond_count,
 		       s.vector
 		FROM shards s
-		WHERE s.category != 'core';
+		WHERE s.category != 'core' AND s.category != 'community';
 	`
 	stmt, _, err := v.conn.Prepare(query)
 	if err != nil {

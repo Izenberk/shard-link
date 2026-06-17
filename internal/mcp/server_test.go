@@ -284,3 +284,56 @@ func TestCognitiveBiasing_NoCentroid(t *testing.T) {
 		}
 	}
 }
+
+// TestCategoryGate_BlockedCategories verifies that categories not in allowedCategories
+// are rejected by validateSaveInput before the handler touches the repository.
+// "community" is system-managed — external callers must never assign it.
+func TestCategoryGate_BlockedCategories(t *testing.T) {
+	blocked := []string{
+		"community", // system-managed digests — MCP callers must not write these
+		"archived",  // eviction output — not a valid save category
+		"",          // empty string falls through to the whitelist check
+		"MEMORY",    // case-sensitive — only lowercase allowed
+		"admin",     // not in allowlist
+	}
+
+	for _, category := range blocked {
+		errMsg := validateSaveInput("test-id", "test content", category, false)
+		if errMsg == "" {
+			t.Errorf("category %q should be rejected but validateSaveInput returned no error", category)
+		}
+	}
+}
+
+// TestCategoryGate_AllowedCategories verifies that the non-core whitelisted categories pass
+// validateSaveInput without error. "core" is whitelisted but requires allow_core=true — tested
+// separately in TestCoreIntentGate_*.
+func TestCategoryGate_AllowedCategories(t *testing.T) {
+	allowed := []string{"memory", "session", "tech", "arch", "contract"}
+
+	for _, category := range allowed {
+		errMsg := validateSaveInput("test-id", "test content", category, false)
+		if errMsg != "" {
+			t.Errorf("category %q should be allowed but got error: %s", category, errMsg)
+		}
+	}
+}
+
+// TestCoreIntentGate_BlockedByDefault verifies that save_memory rejects category=core
+// without an explicit allow_core=true. Core shards are permanently eviction-immune;
+// accidental or autonomous agent writes must be impossible.
+func TestCoreIntentGate_BlockedByDefault(t *testing.T) {
+	errMsg := validateSaveInput("pref-golang", "User prefers Go over Python", "core", false)
+	if errMsg == "" {
+		t.Error("category 'core' without allow_core=true should be rejected")
+	}
+}
+
+// TestCoreIntentGate_AllowedWithFlag verifies that core saves succeed when the caller
+// explicitly passes allow_core=true, confirming intentional write.
+func TestCoreIntentGate_AllowedWithFlag(t *testing.T) {
+	errMsg := validateSaveInput("pref-golang", "User prefers Go over Python", "core", true)
+	if errMsg != "" {
+		t.Errorf("category 'core' with allow_core=true should be allowed, got: %s", errMsg)
+	}
+}

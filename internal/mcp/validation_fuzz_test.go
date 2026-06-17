@@ -13,7 +13,7 @@ import (
 //   - Category: max 50 chars, must be in allowedCategories whitelist
 //
 // Returns an error string if invalid, empty string if valid.
-func validateSaveInput(id, content, category string) string {
+func validateSaveInput(id, content, category string, allowCore bool) string {
 	if id == "" {
 		return "ID must not be empty"
 	}
@@ -31,6 +31,9 @@ func validateSaveInput(id, content, category string) string {
 	}
 	if !allowedCategories[category] {
 		return "Category not allowed"
+	}
+	if category == "core" && !allowCore {
+		return "category 'core' requires allow_core=true"
 	}
 	return ""
 }
@@ -63,11 +66,12 @@ func validateQueryInput(query string, limit int) (int, string) {
 
 func TestValidateSaveInput(t *testing.T) {
 	cases := []struct {
-		name     string
-		id       string
-		content  string
-		category string
-		wantErr  bool
+		name      string
+		id        string
+		content   string
+		category  string
+		allowCore bool
+		wantErr   bool
 	}{
 		{
 			name:     "valid input",
@@ -91,11 +95,20 @@ func TestValidateSaveInput(t *testing.T) {
 			wantErr:  true,
 		},
 		{
-			name:     "core category allowed",
-			id:       "test-shard",
-			content:  "content",
-			category: "core",
-			wantErr:  false,
+			name:      "core blocked without allow_core flag",
+			id:        "test-shard",
+			content:   "content",
+			category:  "core",
+			allowCore: false,
+			wantErr:   true,
+		},
+		{
+			name:      "core allowed with allow_core flag",
+			id:        "test-shard",
+			content:   "content",
+			category:  "core",
+			allowCore: true,
+			wantErr:   false,
 		},
 		{
 			name:     "unknown category rejected",
@@ -129,7 +142,7 @@ func TestValidateSaveInput(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			errMsg := validateSaveInput(tc.id, tc.content, tc.category)
+			errMsg := validateSaveInput(tc.id, tc.content, tc.category, tc.allowCore)
 			gotErr := errMsg != ""
 			if gotErr != tc.wantErr {
 				t.Errorf("validateSaveInput(%q, len=%d, %q) err=%q, wantErr=%v",
@@ -216,15 +229,14 @@ func FuzzValidateSaveInput(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, id, content, category string) {
 		// Must never panic — this is the primary fuzz contract.
-		result := validateSaveInput(id, content, category)
+		result := validateSaveInput(id, content, category, false)
 
-		// If all inputs are valid, result should be empty.
-		// If any input is invalid, result should be non-empty.
-		// We don't check the exact message — just that the function is deterministic
-		// and returns consistently.
+		// core is excluded: with allowCore=false, core is always an error even though
+		// it's in allowedCategories. The fuzz test doesn't parametrize allowCore.
 		if id != "" && len(id) <= maxIDLen &&
 			content != "" && len(content) <= maxContentLen &&
-			len(category) <= maxCategoryLen && allowedCategories[category] {
+			len(category) <= maxCategoryLen && allowedCategories[category] &&
+			category != "core" {
 			if result != "" {
 				t.Errorf("expected valid input to pass, got error: %s", result)
 			}
