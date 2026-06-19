@@ -1430,6 +1430,9 @@ func (s *MCPServer) handleSave(ctx context.Context, request mcp.CallToolRequest)
 	}
 
 	// 2.2 — Content size limits
+	if id == "" {
+		return mcp.NewToolResultError("ID is required — provide a descriptive kebab-case identifier (e.g. 'contract-cli-hub-feature-name')"), nil
+	}
 	if len(id) > maxIDLen {
 		return mcp.NewToolResultError(fmt.Sprintf("ID exceeds max length of %d characters", maxIDLen)), nil
 	}
