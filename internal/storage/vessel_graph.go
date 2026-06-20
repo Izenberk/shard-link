@@ -637,6 +637,28 @@ func (v *VesselGraph) Close() error {
 	return v.driver.Close(context.Background())
 }
 
+// CountShardsSince returns the number of non-summary shards created after the
+// given timestamp. Used at startup to rehydrate the dirty shard counter.
+func (v *VesselGraph) CountShardsSince(ctx context.Context, since time.Time) (int64, error) {
+	const query = `
+		MATCH (s:Shard)
+		WHERE s.created_at > $since AND NOT s.id STARTS WITH 'comm-summary-'
+		RETURN count(s) AS n
+	`
+	result, err := neo4j.ExecuteQuery(ctx, v.driver, query,
+		map[string]any{"since": since.UTC().Format(time.RFC3339)},
+		neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithDatabase(v.dbName))
+	if err != nil {
+		return 0, fmt.Errorf("count shards since: %w", err)
+	}
+	if len(result.Records) == 0 {
+		return 0, nil
+	}
+	n, _, err := neo4j.GetRecordValue[int64](result.Records[0], "n")
+	return n, err
+}
+
 func (v *VesselGraph) GetCount(ctx context.Context) (int, error) {
 	query := "MATCH (s:Shard) RETURN count(s) as count"
 	res, err := neo4j.ExecuteQuery(ctx, v.driver, query, nil, neo4j.EagerResultTransformer,

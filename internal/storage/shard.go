@@ -38,6 +38,13 @@ func ConsumeDirtyShards(n int64) {
 // LastSynthesisTime returns the timestamp of the last synthesis run.
 func LastSynthesisTime() time.Time { return time.Unix(0, lastSynthesisNano.Load()) }
 
+// InitSynthesisState seeds both atomics from persisted storage on startup,
+// allowing the synthesizer to continue from where it left off across restarts.
+func InitSynthesisState(lastAt time.Time, dirtyCount int64) {
+	lastSynthesisNano.Store(lastAt.UnixNano())
+	dirtyShardCount.Store(dirtyCount)
+}
+
 // LogFunc is a callback for broadcasting system activity.
 type LogFunc func(msg string, category string, shardID string)
 

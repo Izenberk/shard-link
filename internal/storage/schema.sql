@@ -59,3 +59,10 @@ CREATE TABLE IF NOT EXISTS activity_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_activity_time ON activity_logs(timestamp DESC);
+
+-- SYSTEM STATE (Persistent process-level state across restarts)
+CREATE TABLE IF NOT EXISTS system_state (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);

@@ -104,7 +104,10 @@ func main() {
 	}
 	defer v.Close()
 
-	// 2.5 Initialize Activity Ledger (SQLite) for cross-process logging
+	// 2.5 Type-assert the graph vessel early — needed by ledger init and hygiene worker.
+	graphV, _ := v.(*storage.VesselGraph)
+
+	// 2.6 Initialize Activity Ledger (SQLite) for cross-process logging
 	dbPath := os.Getenv("DATABASE_PATH")
 	if dbPath == "" {
 		dbPath = "data/shard-link.db"
@@ -119,6 +122,24 @@ func main() {
 			})
 		}
 		slog.Info("activity ledger connected", "engine", "sqlite")
+
+		// Rehydrate synthesizer state from SQLite so dirty count and deferral
+		// clock survive restarts. Falls back to current-time baseline if no
+		// state has been persisted yet (first boot or pre-migration restart).
+		if lastAt, ok, loadErr := lv.LoadSynthesisState(); loadErr != nil {
+			slog.Warn("failed to load synthesis state — using fresh baseline", "error", loadErr)
+		} else if ok {
+			var dirty int64
+			if graphV != nil {
+				if n, countErr := graphV.CountShardsSince(context.Background(), lastAt); countErr != nil {
+					slog.Warn("failed to count dirty shards since last synthesis — defaulting to 0", "error", countErr)
+				} else {
+					dirty = n
+				}
+			}
+			storage.InitSynthesisState(lastAt, dirty)
+			slog.Info("synthesis state rehydrated", "last_synthesis_at", lastAt.Format(time.RFC3339), "dirty_shards", dirty)
+		}
 	}
 
 	// 3. Cancellation context + WaitGroup for graceful shutdown.
@@ -126,7 +147,6 @@ func main() {
 	var wg sync.WaitGroup
 
 	// 3.1 White Dwarf archival vessel (Postgres) — init before Janitor so evictions archive first
-	graphV, _ := v.(*storage.VesselGraph)
 	var av *storage.PostgresVessel
 	if connStr := os.Getenv("DATABASE_URL"); connStr != "" {
 		av, _ = storage.NewPostgresVessel(ctx, connStr)
@@ -224,7 +244,7 @@ func main() {
 			synthInterval = time.Duration(mins) * time.Minute
 		}
 	}
-	syn := synthesizer.NewSynthesizer(v, synthInterval, emb, sum, storage.GlobalLogger)
+	syn := synthesizer.NewSynthesizer(v, synthInterval, emb, sum, storage.GlobalLogger, lv)
 
 	wg.Add(1)
 	go func() {

@@ -18,6 +18,7 @@ type Synthesizer struct {
 	vessel         storage.Repository
 	embedder       storage.Embedder
 	summarizer     storage.Summarizer
+	ledger         *storage.Vessel
 	interval       time.Duration
 	threshold      float64
 	minDirtyShards int64         // Dynamic gate: min shards before synthesis fires
@@ -25,7 +26,7 @@ type Synthesizer struct {
 	logger         storage.LogFunc
 }
 
-func NewSynthesizer(v storage.Repository, interval time.Duration, emb storage.Embedder, sum storage.Summarizer, logger storage.LogFunc) *Synthesizer {
+func NewSynthesizer(v storage.Repository, interval time.Duration, emb storage.Embedder, sum storage.Summarizer, logger storage.LogFunc, ledger *storage.Vessel) *Synthesizer {
 	tStr := os.Getenv("MESH_LINK_THRESHOLD")
 	threshold, err := strconv.ParseFloat(tStr, 64)
 	if err != nil {
@@ -50,6 +51,7 @@ func NewSynthesizer(v storage.Repository, interval time.Duration, emb storage.Em
 		vessel:         v,
 		embedder:       emb,
 		summarizer:     sum,
+		ledger:         ledger,
 		interval:       interval,
 		threshold:      threshold,
 		minDirtyShards: minDirty,
@@ -105,7 +107,12 @@ func (s *Synthesizer) performSynthesis(ctx context.Context) {
 		"dirty", dirty, "threshold", s.minDirtyShards)
 
 	count, err := s.vessel.SyncBonds(ctx, s.threshold)
-	storage.ConsumeDirtyShards(dirty) // replaces ClearMeshDirty(), same position
+	storage.ConsumeDirtyShards(dirty)
+	if s.ledger != nil {
+		if perr := s.ledger.PersistSynthesisState(time.Now()); perr != nil {
+			slog.Warn("synthesizer: failed to persist synthesis state", "error", perr)
+		}
+	}
 	if err != nil {
 		slog.Error("synthesizer bond sync failed", "error", err)
 		return

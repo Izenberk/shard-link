@@ -810,6 +810,43 @@ func (v *Vessel) UpdateShard(ctx context.Context, id string, updates ShardUpdate
 	return nil
 }
 
+// PersistSynthesisState writes the last synthesis timestamp to SQLite so it
+// survives process restarts. Called by the Synthesizer after each successful run.
+func (v *Vessel) PersistSynthesisState(t time.Time) error {
+	const query = `
+		INSERT INTO system_state (key, value, updated_at)
+		VALUES ('last_synthesis_at', ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+	`
+	stmt, _, err := v.conn.Prepare(query)
+	if err != nil {
+		return fmt.Errorf("prepare persist synthesis state: %w", err)
+	}
+	defer stmt.Close()
+	stmt.BindText(1, t.UTC().Format(time.RFC3339Nano))
+	return stmt.Exec()
+}
+
+// LoadSynthesisState reads the last synthesis timestamp from SQLite.
+// Returns (zero time, false, nil) if no state has been persisted yet.
+func (v *Vessel) LoadSynthesisState() (time.Time, bool, error) {
+	const query = `SELECT value FROM system_state WHERE key = 'last_synthesis_at'`
+	stmt, _, err := v.conn.Prepare(query)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("prepare load synthesis state: %w", err)
+	}
+	defer stmt.Close()
+
+	if !stmt.Step() {
+		return time.Time{}, false, stmt.Err()
+	}
+	t, err := time.Parse(time.RFC3339Nano, stmt.ColumnText(0))
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("parse synthesis timestamp: %w", err)
+	}
+	return t, true, nil
+}
+
 func (v *Vessel) Close() error {
 	return v.conn.Close()
 }
