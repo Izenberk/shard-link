@@ -147,7 +147,7 @@ func (s *Synthesizer) performSynthesis(ctx context.Context) {
 			}
 
 			if len(changedCommunities) > 0 && s.summarizer != nil && s.embedder != nil {
-				s.summarizeCommunities(bgCtx, changedCommunities)
+				s.summarizeCommunities(ctx, changedCommunities)
 			}
 		}()
 	} else {
@@ -206,7 +206,7 @@ func (s *Synthesizer) summarizeCommunities(parentCtx context.Context, communityI
 			Category: "community",
 			Content:  summary,
 			Vector:   storage.EncodeVector(vec),
-			Metadata: []byte(fmt.Sprintf(`{"community_id":%d,"member_count":%d}`, cid, len(members))),
+			Metadata: fmt.Appendf(nil, `{"community_id":%d,"member_count":%d}`, cid, len(members)),
 		}
 
 		if err := s.vessel.SaveShard(ctx, shard); err != nil {
@@ -246,18 +246,15 @@ func buildSummaryPrompt(communityID int64, members []storage.Shard) string {
 	var b strings.Builder
 	b.WriteString("You are a knowledge graph analyst. Summarize the following cluster of related knowledge fragments into a single cohesive paragraph. ")
 	b.WriteString("Focus on the overarching theme, key topics, and how they connect. Be concise but informative.\n\n")
-	b.WriteString(fmt.Sprintf("Community ID: %d\n", communityID))
-	b.WriteString(fmt.Sprintf("Member count: %d\n\n", len(members)))
+	fmt.Fprintf(&b, "Community ID: %d\n", communityID)
+	fmt.Fprintf(&b, "Member count: %d\n\n", len(members))
 	b.WriteString("Fragments (ordered by centrality):\n\n")
 
 	charBudget := 12000
 	used := 0
-	limit := 15
-	if len(members) < limit {
-		limit = len(members)
-	}
+	limit := min(15, len(members))
 
-	for i := 0; i < limit; i++ {
+	for i := range limit {
 		entry := fmt.Sprintf("--- [%s] (category: %s) ---\n%s\n\n", members[i].ID, members[i].Category, members[i].Content)
 		if used+len(entry) > charBudget {
 			break
