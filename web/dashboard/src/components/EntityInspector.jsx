@@ -25,18 +25,18 @@ export default function EntityInspector({ node, degree, links, nodes, onClose, o
   const resonantLinks = links
     ? links
         .filter(l => {
-          const src = l.source.id || l.source
-          const tgt = l.target.id || l.target
+          const src = typeof l.source === 'object' ? l.source.id : l.source
+          const tgt = typeof l.target === 'object' ? l.target.id : l.target
           return src === node.id || tgt === node.id
         })
         .sort((a, b) => (b.weight || 0) - (a.weight || 0))
         .filter((l, _, arr) => {
-          const src = l.source.id || l.source
-          const tgt = l.target.id || l.target
+          const src = typeof l.source === 'object' ? l.source.id : l.source
+          const tgt = typeof l.target === 'object' ? l.target.id : l.target
           const peerId = src === node.id ? tgt : src
           return arr.findIndex(x => {
-            const xSrc = x.source.id || x.source
-            const xTgt = x.target.id || x.target
+            const xSrc = typeof x.source === 'object' ? x.source.id : x.source
+            const xTgt = typeof x.target === 'object' ? x.target.id : x.target
             return (xSrc === node.id ? xTgt : xSrc) === peerId
           }) === arr.indexOf(l)
         })
@@ -152,8 +152,8 @@ export default function EntityInspector({ node, degree, links, nodes, onClose, o
               <div className="bond-empty">NO_RESONANCE_DETECTED</div>
             ) : (
               resonantLinks.map((l, i) => {
-                const src = l.source.id || l.source
-                const tgt = l.target.id || l.target
+                const src = typeof l.source === 'object' ? l.source.id : l.source
+                const tgt = typeof l.target === 'object' ? l.target.id : l.target
                 const peerId = src === node.id ? tgt : src
                 const peerNode = nodes ? nodes.find(n => n.id === peerId) : null
                 const peerSurvival = peerNode ? (peerNode.survival || 0) : 0

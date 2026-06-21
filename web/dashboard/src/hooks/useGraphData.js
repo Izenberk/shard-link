@@ -105,8 +105,8 @@ export default function useGraphData(pauseRefresh = false) {
     const communityNodes = fullData.nodes.filter(n => n.community === communityId)
     const nodeIds = new Set(communityNodes.map(n => n.id))
     const communityLinks = fullData.links.filter(l => {
-      const sID = l.source.id || l.source
-      const tID = l.target.id || l.target
+      const sID = typeof l.source === 'object' ? l.source.id : l.source
+      const tID = typeof l.target === 'object' ? l.target.id : l.target
       return nodeIds.has(sID) && nodeIds.has(tID)
     })
     setChangeType('structure')

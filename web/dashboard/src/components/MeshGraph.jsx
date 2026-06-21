@@ -75,8 +75,8 @@ export default function MeshGraph({
   const buildAdjacencyMap = useCallback((links) => {
     const map = new Map()
     links.forEach(l => {
-      const sID = l.source.id || l.source
-      const tID = l.target.id || l.target
+      const sID = typeof l.source === 'object' ? l.source.id : l.source
+      const tID = typeof l.target === 'object' ? l.target.id : l.target
       if (!map.has(sID)) map.set(sID, new Set())
       if (!map.has(tID)) map.set(tID, new Set())
       map.get(sID).add(tID)
@@ -294,8 +294,8 @@ export default function MeshGraph({
     // Compute degrees
     for (const key in degree) delete degree[key]
     data.links.forEach(l => {
-      const sID = l.source.id || l.source
-      const tID = l.target.id || l.target
+      const sID = typeof l.source === 'object' ? l.source.id : l.source
+      const tID = typeof l.target === 'object' ? l.target.id : l.target
       degree[sID] = (degree[sID] || 0) + 1
       degree[tID] = (degree[tID] || 0) + 1
     })
@@ -307,7 +307,7 @@ export default function MeshGraph({
 
     // Links
     const link = container.select('g.links-layer').selectAll('line')
-      .data(data.links, d => `${d.source.id || d.source}-${d.target.id || d.target}`)
+      .data(data.links, d => `${typeof d.source === 'object' ? d.source.id : d.source}-${typeof d.target === 'object' ? d.target.id : d.target}`)
       .join('line')
       .attr('class', 'link active')
       .style('stroke-width', d => Math.pow(d.weight, 2) * 1.2 + 0.3 + 'px')
@@ -315,8 +315,8 @@ export default function MeshGraph({
 
     link.on('mouseenter', (event, d) => {
       if (!tooltipEl) return
-      const sID = d.source.id || d.source
-      const tID = d.target.id || d.target
+      const sID = typeof d.source === 'object' ? d.source.id : d.source
+      const tID = typeof d.target === 'object' ? d.target.id : d.target
       tooltipEl.querySelector('.tooltip-id').textContent = `${truncateID(sID)} <-> ${truncateID(tID)}`
       tooltipEl.querySelector('.tooltip-category').textContent = ''
       tooltipEl.querySelector('.tooltip-content').textContent = `SIM: ${d.weight.toFixed(2)}`
@@ -331,8 +331,8 @@ export default function MeshGraph({
     .on('click', (event, d) => {
       if (!bondMode) return
       event.stopPropagation()
-      const sID = d.source.id || d.source
-      const tID = d.target.id || d.target
+      const sID = typeof d.source === 'object' ? d.source.id : d.source
+      const tID = typeof d.target === 'object' ? d.target.id : d.target
       onBondDeleted(sID, tID)
     })
 
@@ -481,8 +481,8 @@ export default function MeshGraph({
         return 0.05
       })
       link.style('stroke-opacity', l => {
-        const sID = l.source.id || l.source
-        const tID = l.target.id || l.target
+        const sID = typeof l.source === 'object' ? l.source.id : l.source
+        const tID = typeof l.target === 'object' ? l.target.id : l.target
         return (sID === fid || tID === fid) ? 0.8 : 0.01
       })
       node.style('stroke', n => n.id === fid ? 'var(--accent)' : 'none')
@@ -511,8 +511,8 @@ export default function MeshGraph({
       return 0.05
     })
     link.style('stroke-opacity', l => {
-      const sID = l.source.id || l.source
-      const tID = l.target.id || l.target
+      const sID = typeof l.source === 'object' ? l.source.id : l.source
+      const tID = typeof l.target === 'object' ? l.target.id : l.target
       return (sID === focusedNodeId || tID === focusedNodeId) ? 0.8 : 0.01
     })
     node.style('stroke', n => n.id === focusedNodeId ? 'var(--accent)' : 'none')

@@ -44,8 +44,8 @@ export default function App() {
   // Compute degree for selected node
   const selectedDegree = selectedNode && data
     ? data.links.reduce((count, l) => {
-        const sID = l.source.id || l.source
-        const tID = l.target.id || l.target
+        const sID = typeof l.source === 'object' ? l.source.id : l.source
+        const tID = typeof l.target === 'object' ? l.target.id : l.target
         return count + (sID === selectedNode.id || tID === selectedNode.id ? 1 : 0)
       }, 0)
     : 0
