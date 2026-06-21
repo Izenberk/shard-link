@@ -7,7 +7,7 @@ import CommandBar from './components/CommandBar'
 import ActivityFeed from './components/ActivityFeed'
 import useGraphData from './hooks/useGraphData'
 import useActivityStream from './hooks/useActivityStream'
-import { searchGraph, evictShard, createBond, deleteBond, fetchCommunity, fetchGraph, runJanitor } from './lib/api'
+import { searchGraph, evictShard, createBond, deleteBond, fetchCommunity, fetchGraph, runJanitor, runSynthesizer } from './lib/api'
 
 export default function App() {
   const [selectedNode, setSelectedNode] = useState(null)
@@ -153,6 +153,12 @@ export default function App() {
     return result
   }, [refetch, refetchHealth])
 
+  const handleRunSynthesizer = useCallback(async () => {
+    const result = await runSynthesizer()
+    setTimeout(() => { refetch() }, 2000)
+    return result
+  }, [refetch])
+
   const handleClickShard = useCallback((shardId) => {
     if (!data) return
     const node = data.nodes.find(n => n.id === shardId)
@@ -247,6 +253,7 @@ export default function App() {
         onToggleBondMode={() => { setBondMode(prev => !prev); setSelectedNode(null); }}
         zoomControls={zoomControls}
         onRunJanitor={handleRunJanitor}
+        onRunSynthesizer={handleRunSynthesizer}
       />
 
       {/* Activity Feed */}

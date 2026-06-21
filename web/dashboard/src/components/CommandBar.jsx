@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { ToolButton } from './design-system'
 
-export default function CommandBar({ bondMode, onToggleBondMode, zoomControls, onRunJanitor }) {
+export default function CommandBar({ bondMode, onToggleBondMode, zoomControls, onRunJanitor, onRunSynthesizer }) {
   const [janitorRunning, setJanitorRunning] = useState(false)
+  const [synthRunning, setSynthRunning] = useState(false)
 
   async function handleJanitor() {
     if (janitorRunning) return
@@ -11,6 +12,16 @@ export default function CommandBar({ bondMode, onToggleBondMode, zoomControls, o
       await onRunJanitor?.()
     } finally {
       setJanitorRunning(false)
+    }
+  }
+
+  async function handleSynthesizer() {
+    if (synthRunning) return
+    setSynthRunning(true)
+    try {
+      await onRunSynthesizer?.()
+    } finally {
+      setSynthRunning(false)
     }
   }
 
@@ -43,6 +54,19 @@ export default function CommandBar({ bondMode, onToggleBondMode, zoomControls, o
         }}
       >
         {janitorRunning ? 'JANITOR...' : 'RUN_JANITOR'}
+      </ToolButton>
+      <div className="toolbar-divider" />
+      <ToolButton
+        onClick={handleSynthesizer}
+        title="Run Synthesizer — forge semantic bonds immediately"
+        style={{
+          fontSize: '10px',
+          letterSpacing: '1px',
+          opacity: synthRunning ? 0.5 : 1,
+          borderColor: synthRunning ? 'var(--accent)' : 'transparent',
+        }}
+      >
+        {synthRunning ? 'SYNTH...' : 'RUN_SYNTH'}
       </ToolButton>
       <div className="toolbar-divider" />
       <ToolButton onClick={() => zoomControls?.resetView?.()} title="Recenter View">

@@ -66,3 +66,12 @@ export async function runJanitor() {
   }
   return resp.json()
 }
+
+export async function runSynthesizer() {
+  const resp = await fetch(`${BASE}/api/synthesizer/run`, { method: 'POST' })
+  if (!resp.ok) {
+    const text = await resp.text()
+    throw new Error(`Synthesizer run failed: ${text}`)
+  }
+  return resp.json()
+}

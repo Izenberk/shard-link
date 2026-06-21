@@ -15,6 +15,7 @@ import (
 	"github.com/izenberk/shard-link/internal/janitor"
 	"github.com/izenberk/shard-link/internal/metrics"
 	"github.com/izenberk/shard-link/internal/storage"
+	"github.com/izenberk/shard-link/internal/synthesizer"
 	"github.com/joho/godotenv"
 )
 
@@ -76,6 +77,7 @@ type Server struct {
 	archivalVessel *storage.PostgresVessel
 	embedder       storage.Embedder
 	janitor        *janitor.Janitor
+	synthesizer    *synthesizer.Synthesizer
 	bootTime       time.Time
 }
 
@@ -154,7 +156,26 @@ func main() {
 	if av != nil {
 		archiver = av
 	}
-	j := janitor.NewJanitor(v, archiver, 24*time.Hour, maxSize, storage.GlobalLogger)
+	// Use a closure so janitor and synthesizer pick up GlobalLogger after it is set.
+	lateLogger := func(msg, category, shardID string) {
+		if storage.GlobalLogger != nil {
+			storage.GlobalLogger(msg, category, shardID)
+		}
+	}
+
+	j := janitor.NewJanitor(v, archiver, 24*time.Hour, maxSize, lateLogger)
+
+	var sum storage.Summarizer
+	if geminiKey := os.Getenv("GEMINI_API_KEY"); geminiKey != "" && emb != nil {
+		sumModel := os.Getenv("SUMMARIZER_MODEL")
+		if sumModel == "" {
+			sumModel = "gemini-2.5-flash-lite"
+		}
+		if gs, err := storage.NewGeminiSummarizer(ctx, geminiKey, sumModel); err == nil {
+			sum = gs
+		}
+	}
+	syn := synthesizer.NewSynthesizer(v, 0, emb, sum, lateLogger, lv)
 
 	srv := &Server{
 		vessel:         v,
@@ -162,6 +183,7 @@ func main() {
 		archivalVessel: av,
 		embedder:       emb,
 		janitor:        j,
+		synthesizer:    syn,
 		bootTime:       bootTime,
 	}
 
@@ -200,6 +222,7 @@ func main() {
 	http.HandleFunc("/api/evict", srv.handleEvict)
 	http.HandleFunc("/api/community", srv.handleGetCommunity)
 	http.HandleFunc("/api/janitor/run", srv.handleJanitorRun)
+	http.HandleFunc("/api/synthesizer/run", srv.handleSynthesizerRun)
 	http.HandleFunc("/api/prune-summaries", srv.handlePruneSummaries)
 	http.HandleFunc("/api/health", srv.handleHealthDistribution)
 	http.HandleFunc("/metrics", srv.handleMetrics)
@@ -284,6 +307,26 @@ func (s *Server) handleJanitorRun(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]int{"evicted": evicted})
+}
+
+func (s *Server) handleSynthesizerRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.synthesizer == nil {
+		http.Error(w, "Synthesizer not initialized", http.StatusInternalServerError)
+		return
+	}
+
+	bonded, err := s.synthesizer.RunForced(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]int{"bonded": bonded})
 }
 
 func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {

@@ -66,6 +66,41 @@ func (s *Synthesizer) logActivity(msg, category, shardID string) {
 	}
 }
 
+// RunForced bypasses the dirty-count gate and runs a full synthesis cycle immediately.
+// Returns the number of new bonds forged.
+func (s *Synthesizer) RunForced(ctx context.Context) (int, error) {
+	s.logActivity("Manual synthesis cycle started", "system", "")
+	count, err := s.vessel.SyncBonds(ctx, s.threshold)
+	storage.ConsumeDirtyShards(storage.DirtyShardCount())
+	if s.ledger != nil {
+		if perr := s.ledger.PersistSynthesisState(time.Now()); perr != nil {
+			slog.Warn("synthesizer: failed to persist synthesis state after forced run", "error", perr)
+		}
+	}
+	if err != nil {
+		s.logActivity("Manual synthesis failed: "+err.Error(), "error", "")
+		return 0, err
+	}
+	slog.Info("synthesizer (forced) forged bonds", "count", count)
+	s.logActivity(fmt.Sprintf("Manual synthesis: %d new bonds forged", count), "bond", "")
+	if count > 0 {
+		metrics.SynthesizerBondsCreatedTotal.Add(int64(count))
+		go func() {
+			bgCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+			defer cancel()
+			_, changedCommunities, err := s.vessel.CalculateCommunities(bgCtx)
+			if err != nil {
+				slog.Error("synthesizer (forced) community calculation failed", "error", err)
+				return
+			}
+			if len(changedCommunities) > 0 && s.summarizer != nil && s.embedder != nil {
+				s.summarizeCommunities(ctx, changedCommunities)
+			}
+		}()
+	}
+	return count, nil
+}
+
 func (s *Synthesizer) Run(ctx context.Context) {
 	slog.Info("synthesizer started", "interval", s.interval, "threshold", s.threshold)
 	ticker := time.NewTicker(s.interval)
