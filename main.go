@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -32,7 +33,15 @@ func main() {
 	// 1. Load Credentials
 	apiKey := os.Getenv("HUB_API_KEY")
 	if apiKey == "" {
-		slog.Warn("HUB_API_KEY is not set — server running without authentication")
+		// Empty key disables auth entirely (withAuth passes everything through)
+		// AND would sign OAuth JWTs with an empty secret. Acceptable on
+		// localhost; never behind a public tunnel — refuse to start.
+		publicURL := os.Getenv("PUBLIC_URL")
+		if publicURL != "" && !strings.Contains(publicURL, "localhost") && !strings.Contains(publicURL, "127.0.0.1") {
+			slog.Error("HUB_API_KEY is required when PUBLIC_URL is non-local — refusing to serve unauthenticated on a public URL", "public_url", publicURL)
+			os.Exit(1)
+		}
+		slog.Warn("HUB_API_KEY is not set — server running without authentication (local dev only)")
 	}
 
 	oauthClientID := os.Getenv("OAUTH_CLIENT_ID")
@@ -209,12 +218,12 @@ func main() {
 	case "local":
 		ollamaURL := os.Getenv("OLLAMA_URL")
 		ollamaModel := os.Getenv("OLLAMA_MODEL")
-		emb = storage.NewOllamaEmbedder(ollamaURL, ollamaModel)
+		emb = storage.NewOllamaEmbedder(ollamaURL, ollamaModel, targetDim)
 		slog.Info("intelligence active", "mode", "local", "model", ollamaModel)
 
 	default:
 		emb = storage.NewMockEmbedder(targetDim)
-		slog.Info("intelligence active", "mode", "mock")
+		slog.Warn("intelligence active in MOCK mode — vectors are char-frequency stubs, semantic search will not work (set EMBEDDING_MODE=server or local for production)")
 	}
 
 	// 5.5 Initialize Summarizer and launch Synthesizer

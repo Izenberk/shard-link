@@ -32,14 +32,14 @@ var validRedirectHosts = map[string]bool{
 }
 
 type MCPServer struct {
-	vessel      storage.Repository
-	pgVessel    *storage.PostgresVessel // Archival engine — pinged independently for health checks
-	mcp         *server.MCPServer
-	apiKey      string
-	embedder    storage.Embedder
-	summarizer  storage.Summarizer
-	wm          *WorkingMemory
-	ledger      *storage.Vessel // Activity Ledger (SQLite) for persistent logging
+	vessel     storage.Repository
+	pgVessel   *storage.PostgresVessel // Archival engine — pinged independently for health checks
+	mcp        *server.MCPServer
+	apiKey     string
+	embedder   storage.Embedder
+	summarizer storage.Summarizer
+	wm         *WorkingMemory
+	ledger     *storage.Vessel // Activity Ledger (SQLite) for persistent logging
 	httpServer *http.Server
 
 	// OAuth confidential client credentials — validated at /authorize and /token
@@ -52,7 +52,7 @@ func NewMCPServer(v storage.Repository, apiKey string, oauthClientID, oauthClien
 
 	// 1. Create the base MCP server
 	s := server.NewMCPServer(
-	"Shard-Link Hub",
+		"Shard-Link Hub",
 		"v0.1.0",
 		server.WithResourceCapabilities(true, true),
 		server.WithToolCapabilities(true),
@@ -85,40 +85,75 @@ func NewMCPServer(v storage.Repository, apiKey string, oauthClientID, oauthClien
 	return mcpSrv
 }
 
-// Rate limiting — per API key, 60 req/min with burst of 10
-var (
-	rateLimiters   = make(map[string]*rate.Limiter)
-	rateLimitersMu sync.Mutex
-)
-
-func getLimiter(key string) *rate.Limiter {
-	rateLimitersMu.Lock()
-	defer rateLimitersMu.Unlock()
-	if lim, ok := rateLimiters[key]; ok {
-		return lim
-	}
-	lim := rate.NewLimiter(rate.Every(time.Minute/60), 10)
-	rateLimiters[key] = lim
-	return lim
+// limiterPool is a TTL-swept map of rate limiters. Without sweeping, one
+// entry accumulates per bearer token / client IP forever (every OAuth grant
+// issues a fresh JWT → a fresh map key) — a slow, unbounded memory leak.
+// sweep() is called from the StartHub cleanup ticker.
+type limiterPool struct {
+	mu      sync.Mutex
+	entries map[string]*limiterEntry
+	factory func() *rate.Limiter
 }
 
-// OAuth-specific rate limiting — per IP, 5 req/sec with burst of 3.
+type limiterEntry struct {
+	lim      *rate.Limiter
+	lastSeen time.Time
+}
+
+func newLimiterPool(factory func() *rate.Limiter) *limiterPool {
+	return &limiterPool{entries: make(map[string]*limiterEntry), factory: factory}
+}
+
+func (p *limiterPool) get(key string) *rate.Limiter {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if e, ok := p.entries[key]; ok {
+		e.lastSeen = time.Now()
+		return e.lim
+	}
+	e := &limiterEntry{lim: p.factory(), lastSeen: time.Now()}
+	p.entries[key] = e
+	return e.lim
+}
+
+func (p *limiterPool) sweep(olderThan time.Duration) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	now := time.Now()
+	removed := 0
+	for k, e := range p.entries {
+		if now.Sub(e.lastSeen) > olderThan {
+			delete(p.entries, k)
+			removed++
+		}
+	}
+	return removed
+}
+
+// Rate limiting — per API key / bearer token, 60 req/min with burst of 10
+var rateLimiters = newLimiterPool(func() *rate.Limiter {
+	return rate.NewLimiter(rate.Every(time.Minute/60), 10)
+})
+
+// OAuth-specific rate limiting — per client IP, 5 req/sec with burst of 3.
 // Separate from the MCP data-path limiter because OAuth endpoints are
 // unauthenticated (they establish auth), so they need tighter controls.
-var (
-	oauthLimiters   = make(map[string]*rate.Limiter)
-	oauthLimitersMu sync.Mutex
-)
+var oauthLimiters = newLimiterPool(func() *rate.Limiter {
+	return rate.NewLimiter(rate.Limit(5), 3)
+})
 
-func getOAuthLimiter(ip string) *rate.Limiter {
-	oauthLimitersMu.Lock()
-	defer oauthLimitersMu.Unlock()
-	if lim, ok := oauthLimiters[ip]; ok {
-		return lim
+// clientIP returns the caller's IP for rate-limiting purposes. Behind the
+// Cloudflare Tunnel every request arrives from the tunnel container, so
+// r.RemoteAddr would collapse all external traffic into a single bucket
+// (one abuser exhausts the limit for every legitimate client). Cloudflare
+// sets CF-Connecting-IP to the real client address. Trade-off: a direct
+// LAN caller can spoof the header, but that only buys them a fresh rate
+// bucket — authentication is unaffected.
+func clientIP(r *http.Request) string {
+	if ip := r.Header.Get("CF-Connecting-IP"); ip != "" {
+		return ip
 	}
-	lim := rate.NewLimiter(rate.Limit(5), 3)
-	oauthLimiters[ip] = lim
-	return lim
+	return r.RemoteAddr
 }
 
 // setSecurityHeaders adds standard security headers to all OAuth responses.
@@ -156,8 +191,10 @@ func (s *MCPServer) withAuth(next http.Handler) http.Handler {
 			}
 		}
 
-		// Check direct API key match first (Claude Code CLI path)
-		authorized := key == s.apiKey
+		// Check direct API key match first (Claude Code CLI path).
+		// Constant-time — string == short-circuits on the first differing
+		// byte, leaking prefix-match length (same reasoning as /token).
+		authorized := subtle.ConstantTimeCompare([]byte(key), []byte(s.apiKey)) == 1
 
 		// If not a direct API key match, validate as JWT (OAuth path)
 		if !authorized && key != "" {
@@ -175,7 +212,7 @@ func (s *MCPServer) withAuth(next http.Handler) http.Handler {
 		if limiterKey == "" {
 			limiterKey = r.RemoteAddr
 		}
-		if !getLimiter(limiterKey).Allow() {
+		if !rateLimiters.get(limiterKey).Allow() {
 			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
 			return
 		}
@@ -333,88 +370,92 @@ func (s *MCPServer) handleSearchAll(ctx context.Context, request mcp.CallToolReq
 		}
 	}
 
-	// Parallel fan-out across all engines
+	// Parallel fan-out across all engines. Each goroutine writes only its own
+	// slice — no shared map, no mutex needed.
 	var (
-		mu         sync.Mutex
-		seenShards = make(map[string]storage.Shard)
-		allBonds   []storage.ShardBond
-		wg         sync.WaitGroup
+		textResults, vecResults, graphShards []storage.Shard
+		allBonds                             []storage.ShardBond
+		wg                                   sync.WaitGroup
 	)
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		results, _ := s.vessel.FindText(ctx, query, limit, false)
-		mu.Lock()
-		for _, sh := range results {
-			seenShards[sh.ID] = sh
-		}
-		mu.Unlock()
+		textResults, _ = s.vessel.FindText(ctx, query, limit, false)
 	}()
 
 	if queryVec != nil {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results, _ := s.vessel.FindResonant(ctx, queryVec, limit, false)
-			mu.Lock()
-			for _, sh := range results {
-				seenShards[sh.ID] = sh
-			}
-			mu.Unlock()
+			vecResults, _ = s.vessel.FindResonant(ctx, queryVec, limit, false)
 		}()
 
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			gShards, gBonds, _ := s.vessel.SearchGraph(ctx, queryVec, limit, false)
-			mu.Lock()
-			for _, sh := range gShards {
-				seenShards[sh.ID] = sh
-			}
-			allBonds = append(allBonds, gBonds...)
-			mu.Unlock()
+			graphShards, allBonds, _ = s.vessel.SearchGraph(ctx, queryVec, limit, false)
 		}()
 	}
 
 	wg.Wait()
 
+	// Fuse the three ranked lists with Reciprocal Rank Fusion. This both
+	// deduplicates by ID and produces a deterministic, relevance-ordered
+	// result — iterating a map here would randomize the order on every call,
+	// discarding the ranking each engine computed.
+	fused := storage.ReciprocalRankFusion(3*limit, 60.0, vecResults, textResults, graphShards)
+
 	// Post-filter by category when the caller specifies one.
-	// Applied after dedup but before reinforcement — filtered shards don't get touched.
+	// Applied after fusion but before reinforcement — filtered shards don't get touched.
 	if cat := request.GetString("category", ""); cat != "" {
-		for id, sh := range seenShards {
-			if sh.Category != cat {
-				delete(seenShards, id)
+		filtered := fused[:0]
+		for _, sh := range fused {
+			if sh.Category == cat {
+				filtered = append(filtered, sh)
 			}
 		}
+		fused = filtered
 	}
 
-	if len(seenShards) == 0 {
+	if len(fused) == 0 {
 		return mcp.NewToolResultText("No matching memory shards found across any engine."), nil
 	}
 
 	// AHA! MOMENT: Unified Reinforcement Step
 	// Now that we've deduplicated, touch all identified shards EXACTLY ONCE.
-	shardIDs := make([]string, 0, len(seenShards))
-	for id := range seenShards {
-		shardIDs = append(shardIDs, id)
+	shardIDs := make([]string, len(fused))
+	for i, sh := range fused {
+		shardIDs[i] = sh.ID
 	}
 	_ = s.vessel.ReinforceShards(ctx, shardIDs)
 
 	// Working Memory: update session centroid with retrieved shards
-	s.updateCentroid(ctx, seenShards)
+	s.updateCentroidSlice(ctx, fused)
 
-	// C. Format Response
-	var response string
-	response = fmt.Sprintf("Found %d unique shards and %d relational bonds:\n---\n", len(seenShards), len(allBonds))
-	
-	for _, shard := range seenShards {
-		response += fmt.Sprintf("[%s] (Score: %.2f): %s\n---\n", shard.ID, shard.Confidence, shard.Content)
+	// Only report bonds whose endpoints both survived fusion + filtering —
+	// dangling bond references would point the LLM at shards it can't see.
+	included := make(map[string]bool, len(fused))
+	for _, sh := range fused {
+		included[sh.ID] = true
+	}
+	bonds := allBonds[:0]
+	for _, b := range allBonds {
+		if included[b.FromID] && included[b.ToID] {
+			bonds = append(bonds, b)
+		}
 	}
 
-	if len(allBonds) > 0 {
+	// C. Format Response — ordered by fused relevance, most relevant first
+	response := fmt.Sprintf("Found %d unique shards and %d relational bonds (ordered by relevance):\n---\n", len(fused), len(bonds))
+
+	for _, shard := range fused {
+		response += fmt.Sprintf("[%s] (%s): %s\n---\n", shard.ID, shard.Category, shard.Content)
+	}
+
+	if len(bonds) > 0 {
 		response += "\nRelational Bonds (Mesh Geometry):\n"
-		for _, bond := range allBonds {
+		for _, bond := range bonds {
 			response += fmt.Sprintf("- %s <-> %s (Strength: %.2f)\n", bond.FromID, bond.ToID, bond.Weight)
 		}
 	}
@@ -835,7 +876,7 @@ func (s *MCPServer) handleSearchGraph(ctx context.Context, request mcp.CallToolR
 	shards, bonds, err := s.vessel.SearchGraph(ctx, queryVec, limit, true)
 	if err != nil {
 		slog.Error("search_graph failed", "error", err)
-		return nil, err
+		return mcp.NewToolResultError(fmt.Sprintf("graph search failed: %v", err)), nil
 	}
 
 	// Working Memory: update session centroid with retrieved shards
@@ -926,14 +967,19 @@ func (s *MCPServer) handleSearch(ctx context.Context, request mcp.CallToolReques
 	results, err := s.vessel.FindResonant(ctx, queryVec, limit, true)
 	if err != nil {
 		slog.Error("search_memory failed", "error", err)
-		return nil, err
+		return mcp.NewToolResultError(fmt.Sprintf("vector search failed: %v", err)), nil
 	}
 
-	// MMR diversity re-ranking
-	lambda := request.GetFloat("lambda", 0.7)
-	if envL := os.Getenv("MMR_LAMBDA"); lambda == 0.7 && envL != "" {
-		if parsed, err := strconv.ParseFloat(envL, 64); err == nil {
-			lambda = parsed
+	// MMR diversity re-ranking. Sentinel default (-1) distinguishes "caller
+	// did not pass lambda" from an explicit 0.7 — otherwise an explicit 0.7
+	// would be silently overridden by the MMR_LAMBDA env var.
+	lambda := request.GetFloat("lambda", -1)
+	if lambda < 0 {
+		lambda = 0.7
+		if envL := os.Getenv("MMR_LAMBDA"); envL != "" {
+			if parsed, err := strconv.ParseFloat(envL, 64); err == nil {
+				lambda = parsed
+			}
 		}
 	}
 	results = storage.MaximalMarginalRelevance(queryVec, results, limit, lambda)
@@ -959,7 +1005,10 @@ func (s *MCPServer) handleSearchText(ctx context.Context, request mcp.CallToolRe
 
 	slog.Info("search_text called", "query_len", len(query), "limit", limit)
 
-	// 2.3 — Limit validation
+	// 2.3 — Query + limit validation
+	if query == "" {
+		return mcp.NewToolResultError("query must not be empty"), nil
+	}
 	if len(query) > maxQueryLen {
 		return mcp.NewToolResultError(fmt.Sprintf("Query exceeds max length of %d characters", maxQueryLen)), nil
 	}
@@ -1001,7 +1050,7 @@ func (s *MCPServer) RegisterPrompts() {
 func (s *MCPServer) handleShardPrompt(ctx context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 	query := request.Params.Arguments["query"]
 	slog.Debug("prompt request", "name", "hub_search", "query_len", len(query))
-	
+
 	message := mcp.NewPromptMessage(mcp.RoleUser, mcp.NewTextContent(
 		fmt.Sprintf("Please use the 'search_all' tool to find all relevant shards and graph relationships for the topic: '%s'. Provide a high-signal summary of what you find.", query),
 	))
@@ -1076,7 +1125,7 @@ func (s *MCPServer) handleOAuthMetadata(baseURL string) http.HandlerFunc {
 			"token_endpoint":                        baseURL + "/token",
 			"grant_types_supported":                 []string{"authorization_code"},
 			"response_types_supported":              []string{"code"},
-			"code_challenge_methods_supported":       []string{"S256"},
+			"code_challenge_methods_supported":      []string{"S256"},
 			"token_endpoint_auth_methods_supported": []string{"client_secret_post"},
 		})
 	}
@@ -1088,8 +1137,8 @@ func (s *MCPServer) handleOAuthAuthorize() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		setSecurityHeaders(w)
 
-		// Rate limit: per-IP, 5 req/sec burst 3
-		if !getOAuthLimiter(r.RemoteAddr).Allow() {
+		// Rate limit: per client IP (CF-Connecting-IP behind the tunnel), 5 req/sec burst 3
+		if !oauthLimiters.get(clientIP(r)).Allow() {
 			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
 			return
 		}
@@ -1169,8 +1218,8 @@ func (s *MCPServer) handleOAuthToken() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		setSecurityHeaders(w)
 
-		// Rate limit: per-IP, 5 req/sec burst 3
-		if !getOAuthLimiter(r.RemoteAddr).Allow() {
+		// Rate limit: per client IP (CF-Connecting-IP behind the tunnel), 5 req/sec burst 3
+		if !oauthLimiters.get(clientIP(r)).Allow() {
 			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
 			return
 		}
@@ -1302,6 +1351,11 @@ func (s *MCPServer) StartHub(ctx context.Context, port int, baseURL string) erro
 					}
 				}
 				pendingCodes.Unlock()
+
+				// Sweep idle rate-limiter entries (per-token and per-IP maps
+				// otherwise grow unbounded — see limiterPool).
+				rateLimiters.sweep(1 * time.Hour)
+				oauthLimiters.sweep(1 * time.Hour)
 			}
 		}
 	}()
@@ -1374,15 +1428,6 @@ func (s *MCPServer) biasVector(ctx context.Context, floats []float32, biasParam 
 	return s.wm.Bias(sessionID(ctx), floats, lambda)
 }
 
-// updateCentroid updates the working memory centroid from a deduplicated shard map.
-func (s *MCPServer) updateCentroid(ctx context.Context, shardMap map[string]storage.Shard) {
-	shards := make([]storage.Shard, 0, len(shardMap))
-	for _, sh := range shardMap {
-		shards = append(shards, sh)
-	}
-	s.wm.Update(sessionID(ctx), shards)
-}
-
 // updateCentroidSlice updates the working memory centroid from a shard slice.
 func (s *MCPServer) updateCentroidSlice(ctx context.Context, shards []storage.Shard) {
 	s.wm.Update(sessionID(ctx), shards)
@@ -1436,11 +1481,30 @@ func (s *MCPServer) handleSave(ctx context.Context, request mcp.CallToolRequest)
 	if len(id) > maxIDLen {
 		return mcp.NewToolResultError(fmt.Sprintf("ID exceeds max length of %d characters", maxIDLen)), nil
 	}
+	if content == "" {
+		return mcp.NewToolResultError("content is required"), nil
+	}
 	if len(content) > maxContentLen {
 		return mcp.NewToolResultError(fmt.Sprintf("Content exceeds max size of %dKB", maxContentLen/1024)), nil
 	}
 	if len(category) > maxCategoryLen {
 		return mcp.NewToolResultError(fmt.Sprintf("Category exceeds max length of %d characters", maxCategoryLen)), nil
+	}
+
+	// 2.4 — Upsert guard. SaveShard uses MERGE, so saving an existing ID
+	// silently overwrites it. Without these checks, save_memory would be a
+	// backdoor around the protections update_shard/delete_shard enforce:
+	// re-saving a core shard with category='memory' would demote it (making
+	// it evictable) with no confirm_core, and system-managed community
+	// summaries could be clobbered.
+	if strings.HasPrefix(id, "comm-summary-") {
+		return mcp.NewToolResultError("comm-summary-* shards are system-managed and cannot be written via MCP"), nil
+	}
+	if existing, err := s.vessel.GetShardByID(ctx, id); err == nil {
+		if existing.Category == "core" && !allowCore {
+			return mcp.NewToolResultError(fmt.Sprintf("shard %q already exists as a core identity shard — overwriting requires allow_core=true (or use update_shard with confirm_core=true)", id)), nil
+		}
+		slog.Info("save_memory overwriting existing shard", "id", id, "old_category", existing.Category, "new_category", category)
 	}
 
 	var vec []byte
@@ -1450,6 +1514,16 @@ func (s *MCPServer) handleSave(ctx context.Context, request mcp.CallToolRequest)
 		vec, err = base64.StdEncoding.DecodeString(vecStr)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid vector encoding: %v", err)), nil
+		}
+		// Dimension guard — a wrong-length vector would be persisted and
+		// silently excluded from linking/search by size() checks downstream.
+		if len(vec)%4 != 0 {
+			return mcp.NewToolResultError("Invalid vector: byte length must be a multiple of 4 (float32)"), nil
+		}
+		if s.embedder != nil {
+			if got, want := len(vec)/4, s.embedder.Dimension(); got != want {
+				return mcp.NewToolResultError(fmt.Sprintf("Vector has %d dimensions, expected %d", got, want)), nil
+			}
 		}
 	} else if content != "" && s.embedder != nil {
 		floats, err := s.embedder.Embed(ctx, content)

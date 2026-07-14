@@ -100,16 +100,20 @@ func (g *GeminiEmbedder) Close() error {
 type OllamaEmbedder struct {
 	url   string
 	model string
+	dim   int
 }
 
-func NewOllamaEmbedder(url, model string) *OllamaEmbedder {
+func NewOllamaEmbedder(url, model string, dim int) *OllamaEmbedder {
 	if url == "" {
 		url = "http://localhost:11434"
 	}
 	if model == "" {
 		model = "nomic-embed-text"
 	}
-	return &OllamaEmbedder{url: url, model: model}
+	if dim <= 0 {
+		dim = 768 // nomic-embed-text default
+	}
+	return &OllamaEmbedder{url: url, model: model, dim: dim}
 }
 
 type ollamaResponse struct {
@@ -146,8 +150,7 @@ func (o *OllamaEmbedder) Embed(ctx context.Context, text string) ([]float32, err
 }
 
 func (o *OllamaEmbedder) Dimension() int {
-	// Adjust based on the model (nomic is usually 768, mxbai is 1024)
-	return 768 
+	return o.dim
 }
 
 // --- HELPERS ---

@@ -21,13 +21,13 @@ type VesselGraph struct {
 
 // Community metrics cache for delta-write optimization
 type CommunityMetrics struct {
-	CommunityID		int64
-	PageRank			float64
+	CommunityID int64
+	PageRank    float64
 }
 
 var (
-	communityCache		map[string]CommunityMetrics
-	communityCacheMu	sync.RWMutex
+	communityCache   map[string]CommunityMetrics
+	communityCacheMu sync.RWMutex
 )
 
 // NewVesselGraph initializes the Neo4j connection and ensures the Vector Index exists.
@@ -156,17 +156,29 @@ func (v *VesselGraph) SaveShard(ctx context.Context, s Shard) error {
 
 	_, err := neo4j.ExecuteQuery(ctx, v.driver, query, params, neo4j.EagerResultTransformer,
 		neo4j.ExecuteQueryWithDatabase(v.dbName))
-	if err == nil {
-		if !strings.HasPrefix(s.ID, "comm-summary-") {
-			MarkShardDirty()
-		}
-		if GlobalLogger != nil {
-			GlobalLogger(fmt.Sprintf("Shard Saved: %s", s.ID), "success", s.ID)
-		}
+	if err != nil {
+		return fmt.Errorf("save shard %s: %w", s.ID, err)
+	}
+
+	if !strings.HasPrefix(s.ID, "comm-summary-") {
+		MarkShardDirty()
+	}
+	if GlobalLogger != nil {
+		GlobalLogger(fmt.Sprintf("Shard Saved: %s", s.ID), "success", s.ID)
 	}
 	slog.Debug("shard saved", "id", s.ID, "category", s.Category)
 
 	// Aha! Moment: Immediate Associative Linking (Phase 11)
+	v.linkResonantShards(ctx, s.ID)
+
+	return nil
+}
+
+// linkResonantShards runs the immediate associative-link pass: bond the given
+// shard to every non-archived shard above the cosine threshold. Best-effort —
+// a failure here must not fail the save (The Synthesizer will re-link later),
+// but it is logged rather than silently dropped.
+func (v *VesselGraph) linkResonantShards(ctx context.Context, id string) {
 	tStr := os.Getenv("MESH_LINK_THRESHOLD")
 	threshold, err := strconv.ParseFloat(tStr, 64)
 	if err != nil {
@@ -185,12 +197,12 @@ func (v *VesselGraph) SaveShard(ctx context.Context, s Shard) error {
 	MERGE (new)-[r:CONNECTED_TO]-(existing)
 	SET r.weight = sim
 	`
-	_, _ = neo4j.ExecuteQuery(ctx, v.driver, linkQuery, map[string]any{
-		"id":        s.ID,
+	if _, err := neo4j.ExecuteQuery(ctx, v.driver, linkQuery, map[string]any{
+		"id":        id,
 		"threshold": threshold,
-	}, neo4j.EagerResultTransformer, neo4j.ExecuteQueryWithDatabase(v.dbName))
-
-	return nil
+	}, neo4j.EagerResultTransformer, neo4j.ExecuteQueryWithDatabase(v.dbName)); err != nil {
+		slog.Warn("associative link pass failed — deferring to Synthesizer", "id", id, "error", err)
+	}
 }
 
 func (v *VesselGraph) FindResonant(ctx context.Context, queryVector []byte, limit int, shouldTouch bool) ([]Shard, error) {
@@ -248,7 +260,6 @@ func (v *VesselGraph) ReinforceShards(ctx context.Context, ids []string) error {
 		neo4j.ExecuteQueryWithDatabase(v.dbName))
 	return err
 }
-
 
 // GetEvictionCandidates identifies low-survival shards using the Survival Formula v4.1.
 // Cypher handles hard exclusions (core protection, resonance filter).
@@ -491,7 +502,7 @@ func nodeToShard(node neo4j.Node) Shard {
 	// Phase 9: Source Provenance
 	srcType, _ := props["source_type"].(string)
 	srcRef, _ := props["source_ref"].(string)
-	
+
 	var conf float64
 	if c, ok := props["confidence"].(float64); ok {
 		conf = c
@@ -671,7 +682,7 @@ func (v *VesselGraph) GetCount(ctx context.Context) (int, error) {
 }
 
 func (v *VesselGraph) ArchiveShard(ctx context.Context, id string) error {
-	// Note: In the Triple-Engine model, the caller is responsible for moving 
+	// Note: In the Triple-Engine model, the caller is responsible for moving
 	// data to Postgres before calling this to remove it from the "Living Mesh" (Neo4j).
 	query := "MATCH (s:Shard {id: $id}) DETACH DELETE s"
 	_, err := neo4j.ExecuteQuery(ctx, v.driver, query, map[string]any{"id": id}, neo4j.EagerResultTransformer,
@@ -757,6 +768,23 @@ func (v *VesselGraph) GetAllShards(ctx context.Context) ([]Shard, error) {
 	return shards, nil
 }
 
+// escapeLucene escapes Lucene query-syntax metacharacters so raw user input
+// ("C++", an unbalanced quote) cannot crash the fulltext parser. Wildcard and
+// boolean operators are deliberately neutralized — memory search treats
+// queries as literal keywords, not query syntax.
+func escapeLucene(q string) string {
+	var b strings.Builder
+	b.Grow(len(q))
+	for _, r := range q {
+		switch r {
+		case '+', '-', '&', '|', '!', '(', ')', '{', '}', '[', ']', '^', '"', '~', '*', '?', ':', '\\', '/':
+			b.WriteRune('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
 func (v *VesselGraph) FindText(ctx context.Context, query string, limit int, shouldTouch bool) ([]Shard, error) {
 	// Super Senior Update: Use Full-Text Index instead of rigid CONTAINS
 	// This handles tokenization, case-insensitivity, and ranking.
@@ -781,7 +809,7 @@ func (v *VesselGraph) FindText(ctx context.Context, query string, limit int, sho
 		`
 	}
 	params := map[string]any{
-		"query": query,
+		"query": escapeLucene(query),
 		"limit": limit,
 	}
 	result, err := neo4j.ExecuteQuery(ctx, v.driver, cypher, params, neo4j.EagerResultTransformer,
@@ -851,7 +879,7 @@ func (v *VesselGraph) GetCoreShards(ctx context.Context) ([]Shard, error) {
 
 func (v *VesselGraph) SearchGraph(ctx context.Context, queryVector []byte, limit int, shouldTouch bool) ([]Shard, []ShardBond, error) {
 	vec := DecodeVector(queryVector)
-	
+
 	// Multi-Hop: Find the center AND its connected neighbors + relationships
 	var query string
 	// topK: find multiple center nodes so different queries produce different results
@@ -910,12 +938,12 @@ func (v *VesselGraph) SearchGraph(ctx context.Context, queryVector []byte, limit
 	var shards []Shard
 	var bonds []ShardBond
 	seen := make(map[string]bool)
-	
+
 	if len(result.Records) > 0 {
 		record := result.Records[0]
 		centerNode, _ := record.Get("center")
 		centerDegree, _ := record.Get("centerDegree")
-		
+
 		centerShard := nodeToShard(centerNode.(neo4j.Node))
 		centerShard.BondCount = int(centerDegree.(int64))
 		shards = append(shards, centerShard)
@@ -928,17 +956,17 @@ func (v *VesselGraph) SearchGraph(ctx context.Context, queryVector []byte, limit
 			if neighborNode == nil {
 				continue
 			}
-			
+
 			neighborShard := nodeToShard(neighborNode.(neo4j.Node))
 			if deg, ok := m["degree"].(int64); ok {
 				neighborShard.BondCount = int(deg)
 			}
-			
+
 			if !seen[neighborShard.ID] {
 				shards = append(shards, neighborShard)
 				seen[neighborShard.ID] = true
 			}
-			
+
 			// Capture the bond
 			weight, _ := m["weight"].(float64)
 			bonds = append(bonds, ShardBond{
@@ -1282,6 +1310,12 @@ func (v *VesselGraph) UpdateShard(ctx context.Context, id string, updates ShardU
 	}
 	if len(result.Records) == 0 {
 		return fmt.Errorf("shard %s not found in mesh", id)
+	}
+
+	// Content changed → embedding changed → existing bond weights are stale.
+	// Re-run the associative link pass so the mesh reflects the new vector.
+	if hasVector {
+		v.linkResonantShards(ctx, id)
 	}
 	return nil
 }

@@ -48,16 +48,22 @@ func (j *Janitor) logActivity(msg, category, shardID string) {
 
 // evictShard archives to White Dwarf (Postgres) then removes from Neo4j.
 // Matches the same two-step sequence as the manual EVICT_SHARD UI button.
+// Archive-before-delete is an invariant: if archival fails (or the shard can't
+// be fetched), the eviction is skipped entirely — the next cycle retries.
+// Deleting without a confirmed archive would be permanent data loss.
 func (j *Janitor) evictShard(ctx context.Context, id string) {
 	if j.archivalVessel != nil {
 		shard, err := j.vessel.GetShardByID(ctx, id)
-		if err == nil {
-			shard.Category = "archived"
-			if err := j.archivalVessel.SaveArchivedShard(ctx, shard); err != nil {
-				slog.Error("janitor: failed to archive shard to White Dwarf", "shard_id", id, "error", err)
-			}
-		} else {
-			slog.Error("janitor: failed to fetch shard before archival", "shard_id", id, "error", err)
+		if err != nil {
+			slog.Error("janitor: failed to fetch shard before archival — skipping eviction", "shard_id", id, "error", err)
+			j.logActivity("Eviction skipped (fetch failed): "+id, "warn", id)
+			return
+		}
+		shard.Category = "archived"
+		if err := j.archivalVessel.SaveArchivedShard(ctx, shard); err != nil {
+			slog.Error("janitor: White Dwarf archival failed — skipping eviction to prevent data loss", "shard_id", id, "error", err)
+			j.logActivity("Eviction skipped (archive failed): "+id, "warn", id)
+			return
 		}
 	}
 	_ = j.vessel.ArchiveShard(ctx, id)
