@@ -215,6 +215,44 @@ func TestBuildSummaryPrompt_MemberCap(t *testing.T) {
 	}
 }
 
+// --- pending summary retry ---
+
+// TestMergePendingSummaries_DedupesAndCombines verifies changed communities and
+// previously-failed communities are combined without duplicates.
+func TestMergePendingSummaries_DedupesAndCombines(t *testing.T) {
+	syn := &Synthesizer{}
+	syn.markSummaryPending(41)
+	syn.markSummaryPending(7)
+
+	got := syn.mergePendingSummaries([]int64{7, 12})
+
+	want := map[int64]bool{41: true, 7: true, 12: true}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d unique ids, got %d: %v", len(want), len(got), got)
+	}
+	for _, id := range got {
+		if !want[id] {
+			t.Errorf("unexpected id %d in merged result", id)
+		}
+	}
+}
+
+// TestMarkAndClearSummaryPending verifies a community is retried after being
+// marked pending, and stops being retried once cleared (successful summarization).
+func TestMarkAndClearSummaryPending(t *testing.T) {
+	syn := &Synthesizer{}
+
+	syn.markSummaryPending(41)
+	if got := syn.mergePendingSummaries(nil); len(got) != 1 || got[0] != 41 {
+		t.Fatalf("expected [41] pending, got %v", got)
+	}
+
+	syn.clearSummaryPending(41)
+	if got := syn.mergePendingSummaries(nil); len(got) != 0 {
+		t.Fatalf("expected no pending ids after clear, got %v", got)
+	}
+}
+
 // --- performSynthesis dynamic gate ---
 
 // TestDynamicGate_BelowThreshold verifies that synthesis is deferred when dirty < min

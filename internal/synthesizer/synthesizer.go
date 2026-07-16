@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/izenberk/shard-link/internal/metrics"
@@ -24,6 +25,13 @@ type Synthesizer struct {
 	minDirtyShards int64         // Dynamic gate: min shards before synthesis fires
 	maxDeferral    time.Duration // Dynamic gate: max time before forced synthesis
 	logger         storage.LogFunc
+
+	pendingMu sync.Mutex
+	// pendingSummaries holds community IDs whose last summarization attempt
+	// failed (e.g. a transient Gemini/DNS error). Without this, a community
+	// that doesn't change membership again would never get retried and its
+	// summary shard would be permanently missing.
+	pendingSummaries map[int64]struct{}
 }
 
 func NewSynthesizer(v storage.Repository, interval time.Duration, emb storage.Embedder, sum storage.Summarizer, logger storage.LogFunc, ledger *storage.Vessel) *Synthesizer {
@@ -48,16 +56,56 @@ func NewSynthesizer(v storage.Repository, interval time.Duration, emb storage.Em
 	}
 
 	return &Synthesizer{
-		vessel:         v,
-		embedder:       emb,
-		summarizer:     sum,
-		ledger:         ledger,
-		interval:       interval,
-		threshold:      threshold,
-		minDirtyShards: minDirty,
-		maxDeferral:    maxDefer,
-		logger:         logger,
+		vessel:           v,
+		embedder:         emb,
+		summarizer:       sum,
+		ledger:           ledger,
+		interval:         interval,
+		threshold:        threshold,
+		minDirtyShards:   minDirty,
+		maxDeferral:      maxDefer,
+		logger:           logger,
+		pendingSummaries: make(map[int64]struct{}),
 	}
+}
+
+func (s *Synthesizer) markSummaryPending(cid int64) {
+	s.pendingMu.Lock()
+	if s.pendingSummaries == nil {
+		s.pendingSummaries = make(map[int64]struct{})
+	}
+	s.pendingSummaries[cid] = struct{}{}
+	s.pendingMu.Unlock()
+}
+
+func (s *Synthesizer) clearSummaryPending(cid int64) {
+	s.pendingMu.Lock()
+	delete(s.pendingSummaries, cid)
+	s.pendingMu.Unlock()
+}
+
+// mergePendingSummaries combines this cycle's changed communities with any
+// community IDs still owed a summary from a previously failed attempt, so a
+// transient error doesn't leave a community permanently unsummarized.
+func (s *Synthesizer) mergePendingSummaries(changed []int64) []int64 {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+
+	seen := make(map[int64]struct{}, len(changed)+len(s.pendingSummaries))
+	merged := make([]int64, 0, len(changed)+len(s.pendingSummaries))
+	for _, cid := range changed {
+		if _, ok := seen[cid]; !ok {
+			seen[cid] = struct{}{}
+			merged = append(merged, cid)
+		}
+	}
+	for cid := range s.pendingSummaries {
+		if _, ok := seen[cid]; !ok {
+			seen[cid] = struct{}{}
+			merged = append(merged, cid)
+		}
+	}
+	return merged
 }
 
 func (s *Synthesizer) logActivity(msg, category, shardID string) {
@@ -93,8 +141,9 @@ func (s *Synthesizer) RunForced(ctx context.Context) (int, error) {
 				slog.Error("synthesizer (forced) community calculation failed", "error", err)
 				return
 			}
-			if len(changedCommunities) > 0 && s.summarizer != nil && s.embedder != nil {
-				s.summarizeCommunities(ctx, changedCommunities)
+			ids := s.mergePendingSummaries(changedCommunities)
+			if len(ids) > 0 && s.summarizer != nil && s.embedder != nil {
+				s.summarizeCommunities(ctx, ids)
 			}
 		}()
 	}
@@ -181,8 +230,9 @@ func (s *Synthesizer) performSynthesis(ctx context.Context) {
 				s.logActivity(fmt.Sprintf("Synthesizer: pruned %d stale community summaries", pruned), "system", "")
 			}
 
-			if len(changedCommunities) > 0 && s.summarizer != nil && s.embedder != nil {
-				s.summarizeCommunities(ctx, changedCommunities)
+			ids := s.mergePendingSummaries(changedCommunities)
+			if len(ids) > 0 && s.summarizer != nil && s.embedder != nil {
+				s.summarizeCommunities(ctx, ids)
 			}
 		}()
 	} else {
@@ -206,6 +256,7 @@ func (s *Synthesizer) summarizeCommunities(parentCtx context.Context, communityI
 			slog.Error("synthesizer failed to fetch community members",
 				"community_id", cid, "error", err)
 			s.logActivity(fmt.Sprintf("Synthesizer: failed to fetch community %d members — %v", cid, err), "error", "")
+			s.markSummaryPending(cid)
 			continue
 		}
 
@@ -224,6 +275,7 @@ func (s *Synthesizer) summarizeCommunities(parentCtx context.Context, communityI
 			slog.Error("synthesizer summarization failed",
 				"community_id", cid, "error", err)
 			s.logActivity(fmt.Sprintf("Synthesizer: failed to summarize community %d — %v", cid, err), "error", "")
+			s.markSummaryPending(cid)
 			continue
 		}
 
@@ -232,6 +284,7 @@ func (s *Synthesizer) summarizeCommunities(parentCtx context.Context, communityI
 			slog.Error("synthesizer embedding failed",
 				"community_id", cid, "error", err)
 			s.logActivity(fmt.Sprintf("Synthesizer: failed to embed community %d summary — %v", cid, err), "error", "")
+			s.markSummaryPending(cid)
 			continue
 		}
 
@@ -248,9 +301,11 @@ func (s *Synthesizer) summarizeCommunities(parentCtx context.Context, communityI
 			slog.Error("synthesizer failed to save community summary",
 				"shard_id", shardID, "community_id", cid, "error", err)
 			s.logActivity(fmt.Sprintf("Synthesizer: failed to save community %d summary — %v", cid, err), "error", shardID)
+			s.markSummaryPending(cid)
 			continue
 		}
 
+		s.clearSummaryPending(cid)
 		metrics.SynthesizerSummariesTotal.Add(1)
 		slog.Info("synthesizer community summarized",
 			"community_id", cid, "shard_id", shardID, "members", len(members))
