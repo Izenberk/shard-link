@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -112,7 +113,11 @@ func main() {
 
 	var av *storage.PostgresVessel
 	if pgURL != "" {
-		log.Printf("[Init] Connecting to Archival Vessel: %s", pgURL)
+		logURL := pgURL
+		if parsed, parseErr := url.Parse(pgURL); parseErr == nil {
+			logURL = parsed.Redacted()
+		}
+		log.Printf("[Init] Connecting to Archival Vessel: %s", logURL)
 		av, err = storage.NewPostgresVessel(ctx, pgURL)
 		if err != nil {
 			log.Printf("Warning: Failed to connect to Postgres Archival Vessel: %v", err)
